@@ -17,7 +17,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 async function getTargetDrive(req) {
     const driveId = req.query.drive || 'personal';
     const requestingUser = await User.findById(req.user.id);
-    
+
     if (driveId === 'personal') return requestingUser;
 
     const owned = requestingUser.workspacesCreated.id(driveId);
@@ -33,26 +33,33 @@ async function getTargetDrive(req) {
     throw { status: 403, msg: "Unauthorized: You do not have access to this folder." };
 }
 
+// routes/storage.js
+
 router.post('/upload', [auth, upload.single('file')], async (req, res) => {
     if (!req.file) return res.status(400).json({ msg: "No file provided" });
     const driveId = req.query.drive || 'personal';
 
     try {
+        // 1. Fetch targetOwner FIRST to avoid ReferenceErrors
         const targetOwner = await getTargetDrive(req);
 
-        // CHECK LIMITS
+        // 2. CHECK STORAGE LIMITS
         if (targetOwner.storageUsed + req.file.size > targetOwner.storageLimit) {
             return res.status(400).json({ msg: "Upload failed: Not enough storage space." });
         }
-        
+
+        // 3. Determine Folder Path & Location Name
         let folderPath = 'personal';
+        let locationName = "Personal Drive";
+        
         if (driveId !== 'personal') {
             const workspace = targetOwner.workspacesCreated.id(driveId);
             folderPath = workspace ? workspace.name : 'UnknownWorkspace';
+            locationName = workspace ? `workspace "${workspace.name}"` : "a shared workspace";
         }
 
+        // 4. AWS S3 Upload
         const s3Key = `${targetOwner.email}/${folderPath}/${Date.now()}-${req.file.originalname}`;
-
         const s3Result = await s3.upload({
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: s3Key,
@@ -60,6 +67,7 @@ router.post('/upload', [auth, upload.single('file')], async (req, res) => {
             ContentType: req.file.mimetype
         }).promise();
 
+        // 5. Save File record to MongoDB
         const newFile = new File({
             owner: targetOwner._id,
             uploadedBy: req.user.id,
@@ -67,26 +75,32 @@ router.post('/upload', [auth, upload.single('file')], async (req, res) => {
             fileName: req.file.originalname,
             fileSize: req.file.size,
             s3Url: s3Result.Location,
-            s3Key: s3Result.Key 
+            s3Key: s3Result.Key
         });
 
         await newFile.save();
 
+        // 6. Update Owner Storage Usage
         targetOwner.storageUsed += req.file.size;
         await targetOwner.save();
 
-        // FIX: Activity is now defined and will log correctly
-        await new Activity({
-            userId: req.user.id,
-            type: 'FILE_UPLOADED',
-            details: `Uploaded ${req.file.originalname} to ${folderPath}`
-        }).save();
+        // 7. SAFE LOGGING: Use try/catch so logging errors don't crash the upload
+        try {
+            await new Activity({
+                userId: req.user.id,
+                type: 'FILE_UPLOADED',
+                details: `Uploaded "${req.file.originalname}" to ${locationName}`
+            }).save();
+        } catch (logErr) {
+            console.error("Activity logging failed, but file was uploaded successfully.");
+        }
 
-        // ALWAYS RETURN JSON
-        res.status(200).json({ msg: "Uploaded!", file: newFile });
-    } catch (err) { 
+        // 8. Success Response
+        return res.status(200).json({ msg: "Uploaded!", file: newFile });
+
+    } catch (err) {
         console.error("UPLOAD ERROR:", err);
-        res.status(500).json({ msg: err.message || "Server Error during upload" }); 
+        return res.status(500).json({ msg: err.message || "Server Error during upload" });
     }
 });
 
@@ -131,19 +145,27 @@ router.delete('/files/:id', auth, async (req, res) => {
         targetOwner.storageUsed = Math.max(0, targetOwner.storageUsed - file.fileSize);
         await targetOwner.save();
 
-        // 8. Log the activity (Ensuring Activity is imported at the top of your file)
+        // 8. Log the activity 
         if (typeof Activity !== 'undefined') {
-            await new Activity({
-                userId: req.user.id,
-                type: 'INVITE_DECLINED', // Or add a specific FILE_DELETED type
-                details: `Deleted file: ${file.fileName}`
-            }).save();
+            try {
+                // Define variables BEFORE creating the new Activity object
+                const workspace = file.workspaceId ? targetOwner.workspacesCreated.id(file.workspaceId) : null;
+                const location = workspace ? `from workspace "${workspace.name}"` : 'from personal drive';
+
+                await new Activity({
+                    userId: req.user.id,
+                    type: 'FILE_DELETED',
+                    details: `Deleted "${file.fileName}" ${location}`
+                }).save();
+            } catch (logErr) {
+                console.error("Activity logging failed:", logErr);
+            }
         }
 
         res.json({ msg: "File deleted and storage updated" });
-    } catch (err) { 
+    } catch (err) {
         console.error("Delete Error:", err);
-        res.status(500).json({ msg: "Server Error: Could not delete file." }); 
+        res.status(500).json({ msg: "Server Error: Could not delete file." });
     }
 });
 

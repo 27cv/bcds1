@@ -96,6 +96,7 @@ router.get('/status', auth, async (req, res) => {
 });
 
 // --- UPDATED WORKSPACE CREATION WITH LOGGING ---
+// @route   POST /api/subscription/workspaces
 router.post('/workspaces', auth, async (req, res) => {
     const { name, allocateGB } = req.body;
     try {
@@ -105,30 +106,37 @@ router.post('/workspaces', auth, async (req, res) => {
             return res.status(403).json({ msg: "Upgrade required to create workspaces." });
         }
 
-        // FIX: Prevent duplicate names that "replace" old folders
-        const nameExists = user.workspacesCreated.some(ws => ws.name.toLowerCase() === name.trim().toLowerCase());
+        // 1. UNIQUE NAME CHECK: Prevent duplicate workspace names for this user
+        const workspaceName = name.trim();
+        const nameExists = user.workspacesCreated.some(
+            ws => ws.name.toLowerCase() === workspaceName.toLowerCase()
+        );
+
         if (nameExists) {
-            return res.status(400).json({ msg: "A workspace with this name already exists." });
+            return res.status(400).json({ 
+                msg: `A workspace named "${workspaceName}" already exists. Please choose a different name.` 
+            });
         }
     
-        // Create folder in S3
+        // 2. AWS S3: Create unique folder
         await s3.putObject({
             Bucket: process.env.AWS_BUCKET_NAME,
-            Key: `${user.email}/${name.trim()}/`
+            Key: `${user.email}/${workspaceName}/`
         }).promise();
 
+        // 3. Database: Save workspace details
         user.workspacesCreated.push({
-            name: name.trim(),
+            name: workspaceName,
             allocatedBytes: (parseInt(allocateGB) || 1) * 1024 * 1024 * 1024
         });
 
         await user.save();
 
-        // FIX: Logging now works without crashing
+        // 4. Activity Log
         await new Activity({
             userId: req.user.id,
             type: 'WORKSPACE_CREATED',
-            details: `Created workspace "${name.trim()}"`
+            details: `Created workspace "${workspaceName}"`
         }).save();
 
         res.json({ msg: "Workspace Created Successfully!" });
@@ -211,10 +219,8 @@ router.post('/accept-invite/:id', auth, async (req, res) => {
 });
 
 
-// routes/subscription.js
 
-// routes/subscription.js
-
+// @route   DELETE /api/subscription/workspaces/:id
 router.delete('/workspaces/:id', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
@@ -252,23 +258,29 @@ router.delete('/workspaces/:id', auth, async (req, res) => {
         }
 
         // 3. Database Updates
-        await FileModel.deleteMany({ owner: user._id, workspaceId: req.params.id });
+        await FileModel.deleteMany({ workspaceId: req.params.id }); // Clean up all files in workspace
+        
+        // FIX: Remove this workspace ID from EVERY user who joined it
+        await User.updateMany(
+            { workspacesJoined: req.params.id },
+            { $pull: { workspacesJoined: req.params.id } }
+        );
+
         user.workspacesCreated.pull({ _id: req.params.id });
         user.storageUsed = Math.max(0, user.storageUsed - totalReclaimedBytes);
         await user.save();
 
-        // 4. ADD DELETE LOG: Ensure this is inside a try/catch to prevent "False Fails"
+        // 4. Activity Log
         try {
             await new Activity({
                 userId: req.user.id,
                 type: 'WORKSPACE_DELETED',
-                details: `Deleted workspace "${wsName}"`
+                details: `"${wsName}"`
             }).save();
         } catch (logErr) {
             console.error("Activity logging failed, but data was deleted.");
         }
 
-        // 5. Send success response to frontend to stop the "Failed to delete" alert
         return res.status(200).json({ msg: "Workspace purged successfully!" });
 
     } catch (err) {
@@ -388,7 +400,7 @@ router.post('/leave-workspace/:id', auth, async (req, res) => {
             await new Activity({
                 userId: req.user.id,
                 type: 'LEAVE_WORKSPACE',
-                details: `Left workspace "${wsName}"`
+                details: `"${wsName}"`
             }).save();
         } catch (logErr) {
             // This message appears in your terminal if logging fails, but the user still leaves
