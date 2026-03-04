@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BCDS Secure Cloud</title>
+    <script src="https://js.stripe.com/v3/"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
@@ -733,10 +734,10 @@
                     <div id="upgradeButtons" style="display: grid; gap: 10px;">
                         <button class="btn" style="background:#10b981; color:white;"
                             onclick="redirectToStripe('Premium')"><i class="fa-solid fa-credit-card"></i> Upgrade to
-                            Premium (RM15/mo)</button>
+                            Premium (RM40/mo)</button>
                         <button class="btn" style="background:#8b5cf6; color:white;"
                             onclick="redirectToStripe('Enterprise')"><i class="fa-solid fa-building"></i> Upgrade to
-                            Enterprise (RM99/mo)</button>
+                            Enterprise (RM120/mo)</button>
                     </div>
                 </div>
 
@@ -799,6 +800,26 @@
     </main>
 
     <script>
+        // dashboard.js
+
+const handlePaymentResponse = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    if (urlParams.get('success') === 'true') {
+        // Optional: Show a success toast or notification
+        console.log("Payment successful! Updating account status...");
+        
+        // Remove the query parameters from the URL without reloading the page
+        // This prevents the "success" logic from running again if the user refreshes
+        window.history.replaceState({}, document.title, "/dashboard.html");
+        
+        // Trigger a fresh fetch of user data to show the new 'Premium' status
+        loadUserStatus(); 
+    }
+};
+
+// Call this on page load
+handlePaymentResponse();
         const token = localStorage.getItem('token');
         if (!token) window.location.href = 'login.html';
         const authHeaders = { 'x-auth-token': token, 'Content-Type': 'application/json' };
@@ -1329,6 +1350,48 @@
                 alert("Network Error: Could not connect to server.");
             }
         }
+
+        async function redirectToStripe(planName) {
+    try {
+        const res = await fetch('http://127.0.0.1:5001/api/subscription/create-checkout', {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ plan: planName })
+        });
+        const session = await res.json();
+        
+        // Redirect to Stripe Checkout
+        const stripe = Stripe('pk_test_51T5fH0GpYkDBDjPdFyxefQPFcBVvaXwrKCgCD7qps9zwGlOWlxXx1Ov8nqNMduSPCech45P2zjiIcthGFYn5gPfa001BlMPhLG');
+        await stripe.redirectToCheckout({ sessionId: session.id });
+    } catch (err) {
+        alert("Payment Error: " + err.message);
+    }
+}
+async function loadUserStatus() {
+    const token = localStorage.getItem('token');
+    if (!token) {
+        window.location.href = 'login.html';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/subscription/status', {
+            headers: { 'x-auth-token': token }
+        });
+        const data = await res.json();
+
+        // Update UI elements
+        document.getElementById('plan-name').innerText = data.package;
+        document.getElementById('storage-limit').innerText = `${(data.limit / 1024 / 1024).toFixed(0)} MB`;
+        
+        // Calculate storage percentage for the progress bar
+        const percent = (data.used / data.limit) * 100;
+        document.getElementById('storage-bar').style.width = `${percent}%`;
+
+    } catch (err) {
+        console.error("Failed to load user status", err);
+    }
+}
 
         function closeWorkspaceModal() { document.getElementById('createWorkspaceModal').style.display = 'none'; }
         function logout() { localStorage.removeItem('token'); window.location.href = 'login.html'; } 

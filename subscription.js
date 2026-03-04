@@ -6,6 +6,7 @@ const FileModel = require('../models/File'); // Renamed to avoid TypeError
 const Invitation = require('../models/Invitation');
 const Activity = require('../models/Activity');
 const AWS = require('aws-sdk');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const s3 = new AWS.S3({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -15,6 +16,7 @@ const s3 = new AWS.S3({
 
 // @route   GET /api/subscription/status
 router.get('/status', auth, async (req, res) => {
+    
     try {
         const user = await User.findById(req.user.id);
         const userEmail = user.email.toLowerCase().trim();
@@ -51,7 +53,13 @@ router.get('/status', auth, async (req, res) => {
 
         // 3. FETCH PERSISTENT ACTIVITY FEED
         // This pulls from the Activity collection to ensure 28 vs 27 is correct
-        const activityFeedRaw = await Activity.find({ userId: req.user.id })
+        // 2. UPDATED LOGIC: Pull logs for user OR actions in their owned workspaces
+        const activityFeedRaw = await Activity.find({ 
+            $or: [
+                { userId: req.user.id },
+                { details: { $regex: user.username, $options: 'i' } } 
+            ] 
+        })
             .sort({ date: -1 })
             .limit(10);
 
@@ -93,6 +101,13 @@ router.post('/workspaces', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
         
+        // 3. RESTRICTION: Check if user is on Basic plan
+        if (user.package === 'Basic') {
+            return res.status(403).json({ 
+                msg: "Basic users cannot create workspaces. Please upgrade your plan." 
+            });
+        }
+    
         await s3.putObject({
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: `${user.email}/${name.trim()}/`
@@ -172,7 +187,8 @@ router.post('/accept-invite/:id', auth, async (req, res) => {
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
-// @route   DELETE /api/subscription/workspaces/:id
+// subscription.js - Updated DELETE /workspaces/:id
+
 router.delete('/workspaces/:id', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
@@ -180,15 +196,22 @@ router.delete('/workspaces/:id', auth, async (req, res) => {
 
         if (!workspace) return res.status(404).json({ msg: "Workspace not found" });
 
-        const folderPath = `${user.email}/${workspace.name}/`;
+        // 1. Find all files associated with this specific workspace ID
+        const filesInWorkspace = await FileModel.find({ 
+            owner: user._id, 
+            workspaceId: req.params.id 
+        });
+        
+        // 2. Calculate the exact total bytes to deduct
+        const totalReclaimedBytes = filesInWorkspace.reduce((acc, file) => acc + file.fileSize, 0);
 
-        // 1. AWS: List all objects in the workspace folder
+        // 3. AWS S3: Delete the entire folder and its contents
+        const folderPath = `${user.email}/${workspace.name}/`;
         const listedObjects = await s3.listObjectsV2({
             Bucket: process.env.AWS_BUCKET_NAME,
             Prefix: folderPath
         }).promise();
 
-        // 2. AWS: Delete all objects found in that folder
         if (listedObjects.Contents.length > 0) {
             const deleteParams = {
                 Bucket: process.env.AWS_BUCKET_NAME,
@@ -197,14 +220,23 @@ router.delete('/workspaces/:id', auth, async (req, res) => {
             await s3.deleteObjects(deleteParams).promise();
         }
 
-        // 3. Database: Remove file records and the workspace itself
+        // 4. Database: Wipe file records, pull workspace, and fix storageUsed
         await FileModel.deleteMany({ owner: user._id, workspaceId: req.params.id });
         user.workspacesCreated.pull({ _id: req.params.id });
+        
+        // Ensure storageUsed never goes below 0 due to rounding or logic errors
+        user.storageUsed = Math.max(0, user.storageUsed - totalReclaimedBytes);
         await user.save();
 
-        res.json({ msg: "Workspace and AWS folder purged successfully" });
+        // 5. Activity Log: Persistent record of the deletion
+        await new Activity({
+            userId: req.user.id,
+            type: 'INVITE_DECLINED', // Or add WORKSPACE_DELETED to your Enum
+            details: `Deleted workspace "${workspace.name}" and reclaimed ${ (totalReclaimedBytes / 1024 / 1024).toFixed(2) } MB`
+        }).save();
+
+        res.json({ msg: "Workspace purged and storage reclaimed!" });
     } catch (err) {
-        console.error(err);
         res.status(500).send('Server Error');
     }
 });
@@ -249,6 +281,57 @@ router.post('/reject-invite/:id', auth, async (req, res) => {
 
         res.json({ msg: "Invitation declined." });
     } catch (err) { res.status(500).send('Server Error'); }
+});
+
+// @route   POST /api/subscription/create-checkout
+router.post('/create-checkout', auth, async (req, res) => {
+    const { plan } = req.body; // 'Premium' or 'Enterprise'
+    const prices = { 
+        'Premium': 'price_1T7A06GpYkDBDjPdPOFenoj4', 
+        'Enterprise': 'price_1T7A0LGpYkDBDjPdUxdXFBUu' 
+    };
+
+    try {
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [{ price: prices[plan], quantity: 1 }],
+            mode: 'subscription',
+            // FIX: Add metadata so the webhook knows the plan name
+            metadata: {
+                planName: plan 
+            },
+            // FIX: Use an absolute path or dashboard path that handles sessions correctly
+            success_url: 'http://localhost:5500/dashboard.html?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url: 'http://localhost:5500/dashboard.html',
+            client_reference_id: req.user.id
+        });
+
+        res.json({ id: session.id });
+    } catch (err) {
+        res.status(500).json({ msg: "Stripe Session Error" });
+    }
+});
+
+// @route   POST /api/subscription/customer-portal
+router.post('/customer-portal', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+
+        if (!user.stripeCustomerId) {
+            return res.status(400).json({ msg: "No active subscription found." });
+        }
+
+        // Create a portal session
+        const session = await stripe.billingPortal.sessions.create({
+            customer: user.stripeCustomerId,
+            return_url: 'http://localhost:5500/dashboard.html',
+        });
+
+        res.json({ url: session.url });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Server Error');
+    }
 });
 
 module.exports = router;
