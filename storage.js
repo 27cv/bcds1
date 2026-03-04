@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const File = require('../models/File');
+const Activity = require('../models/Activity'); // FIX: Added missing import
 const multer = require('multer');
 const AWS = require('aws-sdk');
 
@@ -19,14 +20,11 @@ async function getTargetDrive(req) {
     
     if (driveId === 'personal') return requestingUser;
 
-    // 1. Check if the user is the OWNER
     const owned = requestingUser.workspacesCreated.id(driveId);
     if (owned) return requestingUser;
 
-    // 2. Check if the user is a GUEST who has joined this Workspace ID
     const isJoined = requestingUser.workspacesJoined.includes(driveId);
     if (isJoined) {
-        // Locate the owner of this specific workspace folder
         const owner = await User.findOne({ "workspacesCreated._id": driveId });
         if (!owner) throw { status: 404, msg: "Workspace no longer exists." };
         return owner;
@@ -35,8 +33,6 @@ async function getTargetDrive(req) {
     throw { status: 403, msg: "Unauthorized: You do not have access to this folder." };
 }
 
-// storage.js - POST /upload
-
 router.post('/upload', [auth, upload.single('file')], async (req, res) => {
     if (!req.file) return res.status(400).json({ msg: "No file provided" });
     const driveId = req.query.drive || 'personal';
@@ -44,7 +40,7 @@ router.post('/upload', [auth, upload.single('file')], async (req, res) => {
     try {
         const targetOwner = await getTargetDrive(req);
 
-        // CHECK LIMITS: Prevent upload if it exceeds storage limit
+        // CHECK LIMITS
         if (targetOwner.storageUsed + req.file.size > targetOwner.storageLimit) {
             return res.status(400).json({ msg: "Upload failed: Not enough storage space." });
         }
@@ -76,19 +72,22 @@ router.post('/upload', [auth, upload.single('file')], async (req, res) => {
 
         await newFile.save();
 
-        // ATOMIC UPDATE: Ensure storage is updated accurately
         targetOwner.storageUsed += req.file.size;
         await targetOwner.save();
 
-        // LOG UPLOAD ACTIVITY
+        // FIX: Activity is now defined and will log correctly
         await new Activity({
             userId: req.user.id,
             type: 'FILE_UPLOADED',
             details: `Uploaded ${req.file.originalname} to ${folderPath}`
         }).save();
 
-        res.json({ msg: "Uploaded!", file: newFile });
-    } catch (err) { res.status(500).send('Server Error'); }
+        // ALWAYS RETURN JSON
+        res.status(200).json({ msg: "Uploaded!", file: newFile });
+    } catch (err) { 
+        console.error("UPLOAD ERROR:", err);
+        res.status(500).json({ msg: err.message || "Server Error during upload" }); 
+    }
 });
 
 router.get('/files', auth, async (req, res) => {
@@ -97,33 +96,55 @@ router.get('/files', auth, async (req, res) => {
         const targetOwner = await getTargetDrive(req);
         const filter = {
             owner: targetOwner._id,
-            workspaceId: driveId === 'personal' ? null : driveId // FILTER BY CONTEXT
+            workspaceId: driveId === 'personal' ? null : driveId
         };
         const files = await File.find(filter).populate('uploadedBy', 'username').sort({ date: -1 });
         res.json(files);
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
-// storage.js - Updated DELETE /files/:id
-
 router.delete('/files/:id', auth, async (req, res) => {
     try {
+        // 1. Fetch the file first so we can check permissions
         const file = await File.findById(req.params.id);
         if (!file) return res.status(404).json({ msg: "File not found" });
 
-        // AWS S3 Delete
+        // 2. Fetch the owner of the storage (Personal or Workspace)
+        const targetOwner = await User.findById(file.owner);
+
+        // 3. Define the permission variables after fetching the data
+        const isWorkspaceOwner = targetOwner._id.toString() === req.user.id;
+        const isFileUploader = file.uploadedBy.toString() === req.user.id;
+
+        // 4. Check if the user has the right to delete
+        if (!isWorkspaceOwner && !isFileUploader) {
+            return res.status(403).json({ msg: "Unauthorized: Only the workspace owner or the uploader can delete this file." });
+        }
+
+        // 5. Perform the AWS S3 deletion
         await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: file.s3Key }).promise();
 
-        // Database Delete
+        // 6. Delete the record from MongoDB
         await File.findByIdAndDelete(req.params.id);
 
-        // Reclaim Storage for the owner
-        const targetOwner = await User.findById(file.owner);
+        // 7. Reclaim storage space for the owner
         targetOwner.storageUsed = Math.max(0, targetOwner.storageUsed - file.fileSize);
         await targetOwner.save();
 
+        // 8. Log the activity (Ensuring Activity is imported at the top of your file)
+        if (typeof Activity !== 'undefined') {
+            await new Activity({
+                userId: req.user.id,
+                type: 'INVITE_DECLINED', // Or add a specific FILE_DELETED type
+                details: `Deleted file: ${file.fileName}`
+            }).save();
+        }
+
         res.json({ msg: "File deleted and storage updated" });
-    } catch (err) { res.status(500).send('Server Error'); }
+    } catch (err) { 
+        console.error("Delete Error:", err);
+        res.status(500).json({ msg: "Server Error: Could not delete file." }); 
+    }
 });
 
 router.get('/download/:id', auth, async (req, res) => {
@@ -137,7 +158,6 @@ router.get('/download/:id', auth, async (req, res) => {
         };
 
         const fileStream = s3.getObject(params).createReadStream();
-
         res.attachment(file.fileName);
         fileStream.pipe(res);
     } catch (err) {

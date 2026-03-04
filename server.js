@@ -6,6 +6,8 @@ require('dotenv').config();
 const app = express();
 
 // --- 1. STRIPE WEBHOOK (MUST BE BEFORE express.json()) ---
+// server.js
+
 app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
@@ -17,47 +19,43 @@ app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), a
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    if (event.type === 'invoice.paid' || event.type === 'checkout.session.completed') {
+    // Process successful payments
+    if (event.type === 'checkout.session.completed' || event.type === 'invoice.paid') {
         const session = event.data.object;
         const User = require('./models/User');
         const Activity = require('./models/Activity'); 
         
+        // Find the user by Stripe Customer ID or the client_reference_id we sent during checkout
         const user = await User.findOne({ 
             $or: [{ stripeCustomerId: session.customer }, { _id: session.client_reference_id }] 
         });
         
         if (user) {
+            // Update Plan and Storage Limits
             if (event.type === 'checkout.session.completed') {
-    user.stripeCustomerId = session.customer;
-    
-    // Get the plan name we just added to metadata
-    const newPlan = session.metadata?.planName; 
-    if (newPlan) {
-        user.package = newPlan;
-        
-        // Update storage limits based on the plan
-        if (newPlan === 'Premium') {
-            user.storageLimit = 2 * 1024 * 1024 * 1024; // 2GB
-        } else if (newPlan === 'Enterprise') {
-            user.storageLimit = 10 * 1024 * 1024 * 1024; // 10GB
-        }
-    }
+                const purchasedPlan = session.metadata.planName; // Captured from the checkout session
+                user.stripeCustomerId = session.customer;
+                
+                if (purchasedPlan === 'Premium') {
+                    user.package = 'Premium';
+                    user.storageLimit = 100 * 1024 * 1024 * 1024; // 100GB in bytes
+                } else if (purchasedPlan === 'Enterprise') {
+                    user.package = 'Enterprise';
+                    user.storageLimit = 500 * 1024 * 1024 * 1024; // 500GB in bytes
+                }
 
-    await new Activity({
-        userId: user._id,
-        type: 'PLAN_UPGRADED',
-        details: `Upgraded to ${user.package}`
-    }).save();
-}
-
-            if (event.type === 'invoice.paid') {
-                user.subscriptionEnd = new Date(session.lines.data[0].period.end * 1000);
                 await new Activity({
-                    userId: user._id,
-                    type: 'PAYMENT_SUCCESS',
-                    details: `Payment successful for ${user.package}`
-                }).save();
+            userId: user._id,
+            type: 'PAYMENT_SUCCESS', // Use a specific type
+            details: `Successful Payment: Upgraded to ${user.package}`
+        }).save();
             }
+
+            // Update Expiry Date
+            if (event.type === 'invoice.paid' && session.lines) {
+                user.subscriptionEnd = new Date(session.lines.data[0].period.end * 1000);
+            }
+            
             await user.save();
         }
     }
