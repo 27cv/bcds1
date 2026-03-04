@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BCDS Secure Cloud - Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4f46e5; --primary-hover: #4338ca;
+            --bg-color: #f8fafc; --card-bg: #ffffff;
+            --text-main: #334155; --text-muted: #64748b;
+            --border: #e2e8f0; --danger: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { display: flex; height: 100vh; background-color: var(--bg-color); align-items: center; justify-content: center; }
+
+        .auth-container { width: 100%; max-width: 400px; background: var(--card-bg); padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid var(--border); }
+        .auth-header { text-align: center; margin-bottom: 30px; }
+        .auth-header i { font-size: 3rem; color: var(--primary); margin-bottom: 15px; }
+        .auth-header h1 { font-size: 1.5rem; color: #0f172a; }
+
+        .toggle-btns { display: flex; background: #f1f5f9; border-radius: 8px; padding: 5px; margin-bottom: 25px; }
+        .toggle-btn { flex: 1; text-align: center; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--text-muted); transition: 0.2s; }
+        .toggle-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 0.85rem; font-weight: 500; color: var(--text-main); margin-bottom: 5px; }
+        .form-group input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 6px; outline: none; transition: 0.2s; background: #f8fafc; }
+        .form-group input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); background: white; }
+
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 6px; background: var(--primary); color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        .btn:hover { background: var(--primary-hover); }
+
+        .error-msg { color: var(--danger); font-size: 0.85rem; text-align: center; margin-top: 15px; min-height: 20px; font-weight: 500; }
+
+        #register-form { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="auth-container">
+        <div class="auth-header">
+            <i class="fa-solid fa-shield-halved"></i>
+            <h1>BCDS Secure Cloud</h1>
+        </div>
+
+        <div class="toggle-btns">
+            <div class="toggle-btn active" onclick="switchForm('login')" id="btn-login">Sign In</div>
+            <div class="toggle-btn" onclick="switchForm('register')" id="btn-register">Create Account</div>
+        </div>
+
+        <form id="login-form" onsubmit="handleAuth(event, 'login')">
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" id="login-email" required placeholder="name@example.com">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="login-password" required placeholder="••••••••">
+            </div>
+            <button type="submit" class="btn" id="login-submit">Secure Sign In</button>
+        </form>
+
+        <form id="register-form" onsubmit="handleAuth(event, 'register')">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="reg-username" placeholder="John Doe">
+            </div>
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" id="reg-email" placeholder="name@example.com">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="reg-password" placeholder="Create a strong password">
+            </div>
+            <button type="submit" class="btn" id="reg-submit">Create Account</button>
+        </form>
+
+        <div id="error-message" class="error-msg"></div>
+    </div>
+
+    <script>
+        // Redirect if already logged in
+        if (localStorage.getItem('token')) {
+            window.location.href = 'dashboard.html';
+        }
+
+        function switchForm(form) {
+            document.getElementById('error-message').innerText = '';
+            if (form === 'login') {
+                document.getElementById('login-form').style.display = 'block';
+                document.getElementById('register-form').style.display = 'none';
+                document.getElementById('btn-login').classList.add('active');
+                document.getElementById('btn-register').classList.remove('active');
+            } else {
+                document.getElementById('login-form').style.display = 'none';
+                document.getElementById('register-form').style.display = 'block';
+                document.getElementById('btn-login').classList.remove('active');
+                document.getElementById('btn-register').classList.add('active');
+            }
+        }
+
+        async function handleAuth(e, type) {
+            e.preventDefault();
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.innerText = '';
+            
+            const submitBtn = type === 'login' ? document.getElementById('login-submit') : document.getElementById('reg-submit');
+            const originalText = submitBtn.innerText;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+            submitBtn.disabled = true;
+
+            const endpoint = type === 'login' ? '/api/auth/login' : '/api/auth/register';
+            
+            const payload = type === 'login' 
+                ? { email: document.getElementById('login-email').value, password: document.getElementById('login-password').value }
+                : { username: document.getElementById('reg-username').value, email: document.getElementById('reg-email').value, password: document.getElementById('reg-password').value };
+
+            try {
+                const res = await fetch(`http://127.0.0.1:5001${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    // Save token and redirect
+                    localStorage.setItem('token', data.token);
+                    window.location.href = 'dashboard.html';
+                } else {
+                    errorDiv.innerText = data.msg || 'Authentication failed';
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                }
+            } catch (err) {
+                errorDiv.innerText = 'Network error. Is your server running?';
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

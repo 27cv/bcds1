@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BCDS Secure Cloud</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --workspace: #8b5cf6;
+            --workspace-hover: #7c3aed;
+            --sidebar-bg: #0f172a;
+            --bg-color: #f1f5f9;
+            --card-bg: #ffffff;
+            --text-main: #334155;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        /* --- SIDEBAR --- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--sidebar-bg);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 4px 0 10px rgba(0, 0, 0, 0.05);
+            z-index: 10;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .sidebar-header i {
+            color: var(--primary);
+        }
+
+        .nav-menu {
+            padding: 20px 0;
+            flex: 1;
+        }
+
+        .nav-item {
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            color: #94a3b8;
+            text-decoration: none;
+            cursor: pointer;
+            transition: 0.2s;
+            font-weight: 500;
+        }
+
+        .nav-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: white;
+        }
+
+        .nav-item.active {
+            background-color: rgba(79, 70, 229, 0.15);
+            color: white;
+            border-right: 4px solid var(--primary);
+        }
+
+        .nav-item i {
+            width: 20px;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+
+        .badge {
+            background: var(--danger);
+            color: white;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: bold;
+            margin-left: auto;
+        }
+
+        /* --- MAIN CONTENT --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .topbar {
+            background: var(--card-bg);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .view-section {
+            display: none;
+            padding: 40px;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .view-section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* --- CARDS & GRIDS --- */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+        }
+
+        .card-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #0f172a;
+        }
+
+        /* --- BUTTONS --- */
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-workspace {
+            background: var(--workspace);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-workspace:hover {
+            background: var(--workspace-hover);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+        }
+
+        .btn-outline:hover {
+            background: var(--bg-color);
+        }
+
+        .action-btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            color: white;
+            transition: 0.2s;
+        }
+
+        .action-btn:hover {
+            opacity: 0.8;
+            transform: translateY(-1px);
+        }
+
+        /* --- UPLOAD ZONE --- */
+        .upload-zone {
+            border: 2px dashed var(--border);
+            padding: 40px 20px;
+            text-align: center;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            background: #f8fafc;
+            transition: 0.2s;
+            cursor: pointer;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--primary);
+            background: #f1f5f9;
+        }
+
+        .upload-zone.workspace-theme:hover {
+            border-color: var(--workspace);
+            background: #f5f3ff;
+        }
+
+        /* --- TABLES --- */
+        .table-container {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th {
+            background: #f8fafc;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            padding: 16px;
+            text-align: left;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.95rem;
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: #f8fafc;
+        }
+
+        /* --- WORKSPACE CARDS --- */
+        .ws-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .ws-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .ws-card:hover {
+            border-color: var(--workspace);
+            box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .ws-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            background: #f5f3ff;
+            color: var(--workspace);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .invite-card {
+            border-left: 4px solid var(--warning);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fffbeb;
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+            animation: pulseGlow 2s infinite;
+        }
+
+        @keyframes pulseGlow {
+            0% {
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.2);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+            }
+        }
+
+        /* --- PROGRESS BAR --- */
+        .progress-bg {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        /* --- MODALS --- */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(4px);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            width: 100%;
+            max-width: 450px;
+            border-radius: 12px;
+            padding: 30px;
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .close-modal {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-muted);
+            transition: 0.2s;
+        }
+
+        .close-modal:hover {
+            color: var(--danger);
+        }
+
+        /* --- ACTIVITY FEED --- */
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+
+    <aside class="sidebar">
+        <div class="sidebar-header"><i class="fa-solid fa-shield-halved"></i> BCDS</div>
+        <div class="nav-menu">
+            <a class="nav-item active" id="nav-personal" onclick="switchTab('personal')"><i
+                    class="fa-solid fa-hard-drive"></i> My Drive</a>
+            <a class="nav-item" id="nav-workspaces" onclick="switchTab('workspaces')"><i
+                    class="fa-solid fa-network-wired"></i> Workspaces <span id="inviteBadge" class="badge"
+                    style="display:none;">0</span></a>
+            <a class="nav-item" id="nav-profile" onclick="switchTab('profile')"><i class="fa-solid fa-user-gear"></i>
+                Account & Billing</a>
+        </div>
+        <div style="padding: 20px;">
+            <button class="btn btn-outline" style="color: #94a3b8; border-color: #334155; width: 100%;"
+                onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Sign Out</button>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="topbar">
+            <div class="page-title" id="topbar-title">My Personal Drive</div>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span id="topbar-email"
+                    style="font-weight: 500; font-size: 0.9rem; color: var(--text-muted);">Loading...</span>
+                <div style="width: 35px; height: 35px; background: var(--primary); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;"
+                    id="topbar-avatar">U</div>
+            </div>
+        </header>
+
+        <div id="personal-view" class="view-section active">
+            <div class="dashboard-grid">
+                <div style="display: flex; flex-direction: column; gap: 24px;">
+                    <div class="card">
+                        <div class="card-header"><i class="fa-solid fa-cloud-arrow-up"
+                                style="color: var(--primary);"></i>
+                            Secure Upload</div>
+                        <form id="uploadFormPersonal" onsubmit="handleUpload(event, 'personal')">
+                            <div class="upload-zone" onclick="document.getElementById('fileInputPersonal').click()">
+                                <i class="fa-solid fa-file-shield"
+                                    style="font-size: 2.5rem; color: #cbd5e1; margin-bottom: 15px;"></i>
+                                <p style="color: var(--text-main); font-weight: 500;">Click to select file</p>
+                                <input type="file" id="fileInputPersonal" required style="display:none;"
+                                    onchange="document.getElementById('fileNamePersonal').innerText = this.files[0] ? this.files[0].name : ''">
+                                <p id="fileNamePersonal"
+                                    style="margin-top:15px; font-weight:600; color:var(--primary);">
+                                </p>
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="btnUploadPersonal"><i
+                                    class="fa-solid fa-lock"></i> Encrypt to My Drive</button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header"><i class="fa-solid fa-clock-rotate-left"></i> Recent Activity</div>
+                        <div id="activityFeed" style="max-height: 250px; overflow-y: auto;">
+                            <p style="padding: 20px; text-align: center; color: var(--text-muted);">No recent activity.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 24px;">
+                    <div class="card" style="padding: 20px;">
+                        <div
+                            style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9rem;">
+                            <span style="font-weight: 600; color: var(--text-main);"><i class="fa-solid fa-database"
+                                    style="color: var(--text-muted);"></i> Storage Usage</span>
+                            <span id="personalStorageText">Loading...</span>
+                        </div>
+                        <div class="progress-bg">
+                            <div class="progress-fill" id="personalStorageBar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="flex: 1;">
+                        <div class="card-header" style="justify-content: space-between;">
+                            <div><i class="fa-solid fa-folder-open" style="color: var(--text-muted);"></i> My Files
+                            </div>
+                            <button class="btn btn-outline" style="width:auto; padding:5px 10px; font-size: 0.85rem;"
+                                onclick="loadFiles('personal', 'fileListPersonal')"><i
+                                    class="fa-solid fa-rotate-right"></i></button>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>File Name</th>
+                                        <th>Uploaded By</th>
+                                        <th>Size</th>
+                                        <th style="text-align: right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fileListPersonal">
+                                    <tr>
+                                        <td colspan="4" style="text-align:center;"><i
+                                                class="fa-solid fa-spinner fa-spin"></i> Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="workspaces-view" class="view-section">
+
+            <div id="wsInboxArea" style="display: none; margin-bottom: 30px;">
+                <h3 style="font-size: 1.1rem; margin-bottom: 15px; color: var(--warning);"><i
+                        class="fa-solid fa-envelope-open-text"></i> Pending Invitations</h3>
+                <div id="wsInboxList"></div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="font-size: 1.1rem; color: #0f172a;"><i class="fa-solid fa-network-wired"
+                        style="color: var(--workspace);"></i> My Workspaces</h3>
+                <button class="btn btn-workspace" style="width: auto; padding: 8px 16px; font-size: 0.85rem;"
+                    onclick="openWorkspaceModal()">
+                    <i class="fa-solid fa-folder-plus"></i> Create New Workspace
+                </button>
+            </div>
+            <div class="ws-grid" id="wsJoinedGrid">
+                <div style="grid-column: 1/-1; color: var(--text-muted); font-size: 0.9rem;">You haven't joined any
+                    workspaces yet.</div>
+            </div>
+
+            <div class="card full-width" style="border-top: 4px solid var(--primary); margin-top: 24px;">
+                <div class="card-header" style="border-bottom: 1px solid var(--border); padding-bottom: 15px;">
+                    <i class="fa-solid fa-users-gear"></i> Manage Team Invitations
+                </div>
+
+                <div class="dashboard-grid"
+                    style="margin-bottom: 0; grid-template-columns: 1fr 1fr; gap: 40px; padding-top: 20px;">
+                    <div>
+                        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 20px;"
+                            id="shareLimitText">
+                            Select a workspace to invite members.
+                        </p>
+
+                        <div style="margin-bottom: 20px;">
+                            <label
+                                style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px;">1.
+                                Select Target Workspace</label>
+                            <select id="inviteWorkspaceSelect"
+                                style="width:100%; padding:14px; border:1px solid var(--border); border-radius:8px; outline:none; background: #f8fafc; cursor: pointer; font-weight: 500; color: var(--text-main); transition: 0.2s;">
+                                <option value="">-- Choose a workspace --</option>
+                            </select>
+                        </div>
+
+                        <div style="margin-bottom: 20px;">
+                            <label
+                                style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px;">2.
+                                Enter Team Member Email</label>
+                            <div style="display: flex; gap: 10px;">
+                                <input type="email" id="shareEmailInput" placeholder="team@example.com"
+                                    style="flex:1; padding:14px; border:1px solid var(--border); border-radius:8px; outline:none; background: #f8fafc;">
+                                <button class="btn btn-primary" style="width:auto; padding: 0 25px; border-radius: 8px;"
+                                    onclick="shareStorage()">
+                                    <i class="fa-solid fa-paper-plane"></i> Send Invite
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            style="background: #eef2ff; padding: 15px; border-radius: 8px; border: 1px solid #c7d2fe; display: flex; gap: 12px; align-items: start;">
+                            <i class="fa-solid fa-circle-info" style="color: var(--primary); margin-top: 3px;"></i>
+                            <p style="font-size: 0.85rem; color: #4338ca; line-height: 1.4;">Invited users only gain
+                                access to the **specific folder** selected above. Your personal drive remains private.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Invite Email</th>
+                                    <th>Workspace</th>
+                                    <th>Status</th>
+                                    <th style="text-align: right;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sentInvitesList"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="explorer-view" class="view-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <button class="btn btn-outline" style="width: auto;" onclick="switchTab('workspaces')"><i
+                        class="fa-solid fa-arrow-left"></i> Back to Hub</button>
+
+                <div style="display: flex; gap: 15px; align-items: center;">
+                    <span id="workspaceOwnerBadge"
+                        style="background: #e0e7ff; color: var(--workspace); padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; border: 1px solid #c7d2fe;">
+                        <i class="fa-solid fa-crown" style="margin-right: 5px;"></i> Owned by: Loading...
+                    </span>
+                    <button id="leaveWorkspaceBtn" class="btn"
+                        style="background: var(--danger); color: white; width: auto; font-size: 0.85rem;"
+                        onclick="leaveCurrentWorkspace()">
+                        <i class="fa-solid fa-person-walking-arrow-right"></i> Leave Workspace
+                    </button>
+                    <button id="deleteWorkspaceBtn" class="btn"
+                        style="background: var(--danger); color: white; width: auto; font-size: 0.85rem; display: none;"
+                        onclick="deleteOwnedWorkspace()">
+                        <i class="fa-solid fa-trash-can"></i> Delete Workspace
+                    </button>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header"><i class="fa-solid fa-cloud-arrow-up" style="color: var(--workspace);"></i>
+                        Upload to Team</div>
+                    <form id="uploadFormWorkspace" onsubmit="handleUpload(event, currentWorkspaceId)">
+                        <div class="upload-zone workspace-theme"
+                            onclick="document.getElementById('fileInputWorkspace').click()">
+                            <i class="fa-solid fa-file-export"
+                                style="font-size: 2.5rem; color: #c4b5fd; margin-bottom: 15px;"></i>
+                            <p style="color: var(--text-main); font-weight: 500;">Click to select file</p>
+                            <input type="file" id="fileInputWorkspace" required style="display:none;"
+                                onchange="document.getElementById('fileNameWorkspace').innerText = this.files[0] ? this.files[0].name : ''">
+                            <p id="fileNameWorkspace" style="margin-top:15px; font-weight:600; color:var(--workspace);">
+                            </p>
+                        </div>
+                        <button type="submit" class="btn btn-workspace" id="btnUploadWorkspace"><i
+                                class="fa-solid fa-lock"></i> Encrypt to Workspace</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-header" style="justify-content: space-between;">
+                        <div><i class="fa-regular fa-folder-open" style="color: var(--workspace);"></i> Shared Files
+                        </div>
+                        <button class="btn btn-outline" style="width:auto; padding:5px 10px; font-size: 0.85rem;"
+                            onclick="loadFiles(currentWorkspaceId, 'fileListWorkspace')"><i
+                                class="fa-solid fa-rotate-right"></i></button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>File Name</th>
+                                    <th>Uploaded By</th>
+                                    <th>Size</th>
+                                    <th style="text-align: right;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fileListWorkspace">
+                                <tr>
+                                    <td colspan="4" style="text-align:center;"><i
+                                            class="fa-solid fa-spinner fa-spin"></i> Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="profile-view" class="view-section">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header"><i class="fa-solid fa-gem" style="color: var(--workspace);"></i> Billing &
+                        Subscription</div>
+                    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px;"
+                        id="subStatus">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Loading plan...
+                    </div>
+                    <div id="dateStatus"
+                        style="font-size: 0.9rem; color: var(--text-main); margin-bottom: 20px; padding: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-weight: 500;">
+                    </div>
+
+                    <div id="upgradeButtons" style="display: grid; gap: 10px;">
+                        <button class="btn" style="background:#10b981; color:white;"
+                            onclick="redirectToStripe('Premium')"><i class="fa-solid fa-credit-card"></i> Upgrade to
+                            Premium (RM15/mo)</button>
+                        <button class="btn" style="background:#8b5cf6; color:white;"
+                            onclick="redirectToStripe('Enterprise')"><i class="fa-solid fa-building"></i> Upgrade to
+                            Enterprise (RM99/mo)</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i>
+                        Security Settings</div>
+                    <p style="font-size: 0.95rem; color: var(--text-muted); margin-bottom:20px; line-height: 1.5;">Your
+                        files are encrypted using AES-256 standard and access logs are permanently recorded on the
+                        Ethereum Sepolia network.</p>
+
+                    <div
+                        style="background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid var(--border);">
+                        <h4 style="margin-bottom: 15px; font-size: 1rem;">Update Encryption Password</h4>
+                        <input type="password" id="currentPassword" placeholder="Current Password"
+                            style="width:100%; padding:12px; border:1px solid var(--border); border-radius:6px; margin-bottom:10px; outline:none;">
+                        <input type="password" id="newPassword" placeholder="New Strong Password"
+                            style="width:100%; padding:12px; border:1px solid var(--border); border-radius:6px; margin-bottom:15px; outline:none;">
+                        <button class="btn btn-primary" id="btnConfirmReset" onclick="processPasswordReset()"><i
+                                class="fa-brands fa-ethereum"></i> Reset & Log to Sepolia</button>
+                        <div id="resetMessage" style="margin-top: 15px; font-weight: 500; font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="createWorkspaceModal" class="modal">
+            <div class="modal-content" style="max-width: 450px;">
+                <span class="close-modal" onclick="closeWorkspaceModal()">&times;</span>
+                <h2 style="margin-bottom: 15px; color:#0f172a;"><i class="fa-solid fa-folder-plus"
+                        style="color:var(--workspace);"></i> New Workspace</h2>
+                <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:20px;">Allocate a portion of your
+                    total storage to a dedicated team folder.</p>
+
+                <div class="form-group">
+                    <label>Workspace Name</label>
+                    <input type="text" id="wsName" placeholder="e.g., Marketing Assets"
+                        style="width:100%; padding:12px; border:1px solid var(--border); border-radius:6px; margin-bottom:15px; outline:none;">
+                </div>
+
+                <div class="form-group">
+                    <label>Allocate Storage (GB)</label>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                        <input type="range" id="wsStorageSlider" min="1" max="100" value="5"
+                            style="flex:1; cursor:pointer;"
+                            oninput="document.getElementById('wsStorageValue').innerText = this.value + ' GB'">
+                        <span id="wsStorageValue"
+                            style="font-weight: 600; color: var(--primary); width: 60px; text-align: right;">5 GB</span>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--warning);" id="wsAvailableText">Calculating available
+                        quota...</p>
+                </div>
+
+                <button class="btn btn-workspace" id="btnCreateWorkspace" onclick="submitNewWorkspace()"
+                    style="padding:15px; margin-top: 10px;">
+                    <i class="fa-solid fa-hammer"></i> Create Workspace
+                </button>
+                <div id="wsCreateMessage"
+                    style="margin-top: 15px; font-weight: 500; font-size: 0.9rem; text-align: center;"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) window.location.href = 'login.html';
+        const authHeaders = { 'x-auth-token': token, 'Content-Type': 'application/json' };
+        let currentWorkspaceId = null;
+
+        window.onload = () => fetchMasterData();
+
+        async function fetchMasterData() {
+            try {
+                const res = await fetch('http://127.0.0.1:5001/api/subscription/status', { headers: { 'x-auth-token': token } });
+                const data = await res.json();
+
+                document.getElementById('topbar-email').innerText = data.userEmail;
+                document.getElementById('topbar-avatar').innerText = data.username.charAt(0).toUpperCase();
+
+                renderPersonalData(data);
+                renderWorkspaceHub(data);
+                renderBilling(data);
+                renderActivityFeed(data.activityFeed); // Pass the new feed here
+                loadFiles('personal', 'fileListPersonal');
+            } catch (err) { console.error("Master Data Error:", err); }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+            document.getElementById(`${tabId}-view`).classList.add('active');
+            document.getElementById(`nav-${tabId}`)?.classList.add('active');
+            document.getElementById('topbar-title').innerText = tabId === 'personal' ? 'My Personal Drive' : 'Team Workspaces';
+        }
+
+        function openWorkspace(id, displayName, isOwner) {
+            currentWorkspaceId = id;
+
+            // Switch to the explorer view
+            document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
+            document.getElementById('explorer-view').classList.add('active');
+
+            const badge = document.getElementById('workspaceOwnerBadge');
+            const deleteBtn = document.getElementById('deleteWorkspaceBtn');
+            const leaveBtn = document.getElementById('leaveWorkspaceBtn');
+
+            if (!isOwner) {
+                // Guest View: Show who owns the drive and enable 'Leave' option
+                badge.innerHTML = `<i class="fa-solid fa-user-group"></i> Shared from: ${displayName}`;
+                deleteBtn.style.display = 'none';
+                leaveBtn.style.display = 'inline-flex';
+            } else {
+                // Owner View: Show crown icon and enable 'Delete' option
+                badge.innerHTML = `<i class="fa-solid fa-crown"></i> Owned by: Me (${displayName})`;
+                deleteBtn.style.display = 'inline-flex';
+                leaveBtn.style.display = 'none';
+            }
+
+            // Load the shared file list using the Workspace ID
+            document.getElementById('fileListWorkspace').innerHTML = '<tr><td colspan="4" style="text-align:center;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
+            loadFiles(id, 'fileListWorkspace');
+        }
+
+        function renderBilling(data) {
+            const subStatus = document.getElementById('subStatus');
+            const dateStatus = document.getElementById('dateStatus');
+            const upgradePremiumBtn = document.querySelector('button[onclick*="Premium"]');
+            const upgradeEnterpriseBtn = document.querySelector('button[onclick*="Enterprise"]');
+
+            if (!subStatus) return;
+
+            // Set storage allowance text based on plan
+            let totalLimit = data.package === 'Enterprise' ? '500 GB' : (data.package === 'Premium' ? '50 GB' : '50 MB');
+
+            subStatus.innerHTML = ` 
+        <div style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 5px;">Current Plan</div> 
+        <div style="font-size: 1.5rem; font-weight: 700; color: var(--workspace);">${data.package}</div> 
+        <div style="font-size: 0.9rem; margin-top: 5px; color: var(--text-main);">Total Allowance: <strong>${totalLimit}</strong></div>
+    `;
+
+            // NEW: Update the status banner with specific expiry/renewal dates
+            if (data.package === 'Basic') {
+                dateStatus.innerHTML = `<i class="fa-solid fa-infinity"></i> Lifetime Free Basic Tier`;
+            } else if (data.subscriptionEnd) {
+                // Formats the date received from the backend
+                const expiryDate = new Date(data.subscriptionEnd).toLocaleDateString('en-MY', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+                dateStatus.innerHTML = `<i class="fa-solid fa-calendar-check" style="color:var(--success)"></i> Next Renewal: <strong>${expiryDate}</strong>`;
+            } else {
+                dateStatus.innerHTML = `<i class="fa-solid fa-star" style="color:var(--warning)"></i> Active Subscription`;
+            }
+
+            // --- DYNAMIC BUTTON VISIBILITY ---
+            if (data.package === 'Enterprise') {
+                upgradePremiumBtn.style.display = 'none';
+                upgradeEnterpriseBtn.style.display = 'none';
+            } else if (data.package === 'Premium') {
+                upgradePremiumBtn.style.display = 'none';
+                upgradeEnterpriseBtn.style.display = 'inline-flex';
+            } else {
+                upgradePremiumBtn.style.display = 'inline-flex';
+                upgradeEnterpriseBtn.style.display = 'inline-flex';
+            }
+        }
+
+        async function shareStorage() {
+            const emailInput = document.getElementById('shareEmailInput');
+            const email = emailInput.value.trim();
+            const wsSelector = document.getElementById('inviteWorkspaceSelect');
+            const selectedWsId = wsSelector.value;
+
+            // 1. Precise Validation
+            if (!selectedWsId) {
+                return alert("Please select a target workspace folder from the dropdown.");
+            }
+            if (!email) {
+                return alert("Please enter the team member's email address.");
+            }
+
+            // 2. Targeted API Call
+            try {
+                const res = await fetch('http://127.0.0.1:5001/api/subscription/share', {
+                    method: 'POST',
+                    headers: authHeaders, // Ensure this global variable is defined
+                    body: JSON.stringify({
+                        emailToShare: email,
+                        workspaceId: selectedWsId // Explicitly sends the ID to avoid name conflicts
+                    })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert(`✅ Success: Invitation sent to ${email} for "${wsSelector.options[wsSelector.selectedIndex].text}"`);
+                    emailInput.value = ''; // Reset UI
+                    fetchMasterData(); // Refresh invitation tables
+                } else {
+                    alert("❌ Invitation failed: " + data.msg);
+                }
+            } catch (err) {
+                console.error("Invite System Error:", err);
+                alert("Network Error: Check if the backend server is running.");
+            }
+        }
+
+        async function acceptInvite(inviteId) {
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/subscription/accept-invite/${inviteId}`, {
+                    method: 'POST',
+                    headers: authHeaders
+                });
+                if (res.ok) {
+                    alert("✅ Successfully joined workspace!");
+                    fetchMasterData();
+                }
+            } catch (err) { alert("Network Error"); }
+        }
+
+        async function deleteOwnedWorkspace() {
+            if (!confirm("CRITICAL: Permanently delete this workspace and ALL files in AWS?")) return;
+
+            // Optional: Show a loading state if you have a delete button reference
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/subscription/workspaces/${currentWorkspaceId}`, {
+                    method: 'DELETE',
+                    headers: { 'x-auth-token': token }
+                });
+
+                if (res.ok) {
+                    alert("✅ Remove Success: Workspace and AWS cloud folder purged.");
+                    switchTab('workspaces');
+                    fetchMasterData();
+                } else {
+                    alert("❌ Failed to delete workspace.");
+                }
+            } catch (err) {
+                alert("❌ Network Error: Could not reach server.");
+            }
+        }
+
+        async function loadFiles(driveId, targetBodyId) {
+            const listBody = document.getElementById(targetBodyId);
+            try {
+                // The driveId (workspace _id) is passed as a query parameter
+                const res = await fetch(`http://127.0.0.1:5001/api/storage/files?drive=${driveId}`, {
+                    headers: { 'x-auth-token': token }
+                });
+                const files = await res.json();
+
+                if (files.length === 0) {
+                    listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px;">No files found in this workspace.</td></tr>';
+                    return;
+                }
+
+                listBody.innerHTML = files.map(file => ` 
+            <tr> 
+                <td><i class="fa-solid fa-file-lines"></i> ${file.fileName}</td> 
+                <td><i class="fa-solid fa-user-pen"></i> ${file.uploadedBy?.username || 'Unknown'}</td> 
+                <td>${(file.fileSize / 1024).toFixed(2)} KB</td> 
+                <td style="text-align: right;"> 
+                    <button class="action-btn" style="background:var(--success)" onclick="downloadFile('${file._id}', '${file.fileName}', this)">
+                        <i class="fa-solid fa-download"></i>
+                    </button> 
+                    <button class="action-btn" style="background:var(--danger)" onclick="deleteFile('${file._id}', '${driveId}', '${targetBodyId}')">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button> 
+                </td> 
+            </tr>`).join('');
+            } catch (err) { console.error("File Load Error:", err); }
+        }
+
+        async function handleUpload(e, driveId) {
+            e.preventDefault();
+            const isWs = driveId !== 'personal';
+            const input = document.getElementById(isWs ? 'fileInputWorkspace' : 'fileInputPersonal');
+            const btn = document.getElementById(isWs ? 'btnUploadWorkspace' : 'btnUploadPersonal');
+
+            if (!input.files[0]) return;
+
+            // Save original button content and show loading state
+            const originalBtnText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Encrypting & Uploading...';
+            btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/storage/upload?drive=${driveId}`, {
+                    method: 'POST',
+                    headers: { 'x-auth-token': token },
+                    body: formData
+                });
+
+                if (res.ok) {
+                    alert("✅ Encryption Successful: File stored securely in AWS S3");
+                    fetchMasterData();
+                    loadFiles(driveId, isWs ? 'fileListWorkspace' : 'fileListPersonal');
+                    e.target.reset();
+                    document.getElementById(isWs ? 'fileNameWorkspace' : 'fileNamePersonal').innerText = '';
+                } else {
+                    alert("❌ Upload Failed");
+                }
+            } catch (err) {
+                console.error("Upload Error:", err);
+                alert("❌ Network Error during encryption");
+            } finally {
+                // Restore button state
+                btn.innerHTML = originalBtnText;
+                btn.disabled = false;
+            }
+        }
+
+        async function deleteFile(id, driveId, targetBodyId) {
+            if (!confirm("Are you sure you want to permanently remove this encrypted file?")) return;
+
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/storage/files/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'x-auth-token': token }
+                });
+
+                if (res.ok) {
+                    // Show success message
+                    alert("✅ Remove Success: File purged from cloud storage");
+                    loadFiles(driveId, targetBodyId);
+                    fetchMasterData();
+                } else {
+                    const data = await res.json();
+                    alert("❌ Delete Failed: " + (data.msg || "Unknown error"));
+                }
+            } catch (err) {
+                console.error("Delete Error:", err);
+                alert("❌ Network Error while removing file");
+            }
+        }
+
+        async function downloadFile(id, name, btnElement) {
+            // 1. Show loading state on the clicked button
+            const originalContent = btnElement.innerHTML;
+            btnElement.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btnElement.disabled = true;
+
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/storage/download/${id}`, {
+                    headers: { 'x-auth-token': token }
+                });
+
+                if (!res.ok) throw new Error("Download failed");
+
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = window.URL.createObjectURL(blob);
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+
+                // 2. Clean up
+                window.URL.revokeObjectURL(a.href);
+                document.body.removeChild(a);
+
+                // Optional: Small alert or toast for success
+                console.log(`✅ Download started: ${name}`);
+            } catch (err) {
+                console.error("Download Error:", err);
+                alert("❌ Failed to download file from secure storage.");
+            } finally {
+                // 3. Restore button state
+                btnElement.innerHTML = originalContent;
+                btnElement.disabled = false;
+            }
+        }
+
+        async function submitNewWorkspace() {
+            const nameInput = document.getElementById('wsName');
+            const name = nameInput.value;
+            const gb = document.getElementById('wsStorageSlider').value;
+            const msgDiv = document.getElementById('wsCreateMessage');
+
+            if (!name) return alert("Enter a name");
+
+            msgDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating...';
+
+            try {
+                const res = await fetch('http://127.0.0.1:5001/api/subscription/workspaces', {
+                    method: 'POST',
+                    headers: authHeaders,
+                    body: JSON.stringify({ name: name.trim(), allocateGB: gb })
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert("✅ Workspace Created!");
+                    closeWorkspaceModal();
+                    nameInput.value = '';
+                    msgDiv.innerHTML = '';
+                    fetchMasterData();
+                } else {
+                    msgDiv.innerHTML = `<span style="color:var(--danger); font-weight:600;"><i class="fa-solid fa-circle-exclamation"></i> ${data.msg}</span>`;
+                }
+            } catch (err) {
+                msgDiv.innerHTML = `<span style="color:var(--danger)">Network Error</span>`;
+            }
+        }
+
+        function renderWorkspaceHub(data) {
+            const grid = document.getElementById('wsJoinedGrid');
+            const dropdown = document.getElementById('inviteWorkspaceSelect');
+            const shareInput = document.getElementById('shareEmailInput');
+            const inviteBtn = document.querySelector('button[onclick="shareStorage()"]');
+            const shareText = document.getElementById('shareLimitText');
+            const inboxArea = document.getElementById('wsInboxArea');
+            const inboxList = document.getElementById('wsInboxList');
+
+            // 1. Render Invitations Inbox (What OTHERS sent to you)
+            if (data.inbox && data.inbox.length > 0) {
+                inboxArea.style.display = 'block';
+                inboxList.innerHTML = data.inbox.map(inv => `
+            <div class="invite-card">
+                <div><strong>${inv.inviter.username}</strong> invited you to join <strong>${inv.workspaceName}</strong></div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-primary" style="width:auto; padding: 5px 15px;" onclick="acceptInvite('${inv._id}')">Accept</button>
+                    <button class="btn btn-outline" style="width:auto; padding: 5px 15px; color: var(--danger); border-color: var(--danger);" onclick="rejectInvite('${inv._id}')">Reject</button>
+                </div>
+            </div>`).join('');
+            } else {
+                inboxArea.style.display = 'none';
+            }
+
+            // 2. Render Workspace Cards (Owned & Shared)
+            let html = '';
+            // Owned Workspaces
+            if (data.workspacesCreated) {
+                html += data.workspacesCreated.map(ws => `
+            <div class="ws-card" onclick="openWorkspace('${ws._id}', '${ws.name}', true)">
+                <div class="ws-icon" style="background:#eef2ff;"><i class="fa-solid fa-briefcase"></i></div>
+                <div><h4>${ws.name}</h4><span style="color:var(--primary); font-weight:600;">Owner</span></div>
+            </div>`).join('');
+            }
+            // Shared Workspaces
+            if (data.workspaces) {
+                html += data.workspaces.map(ws => `
+            <div class="ws-card" onclick="openWorkspace('${ws._id}', '${ws.username}', false)">
+                <div class="ws-icon"><i class="fa-solid fa-folder-tree"></i></div>
+                <div><h4>${ws.name}</h4><span>Shared from ${ws.username}</span></div>
+            </div>`).join('');
+            }
+            grid.innerHTML = html || '<div style="grid-column: 1/-1; color: var(--text-muted);">No workspaces yet.</div>';
+
+            // 3. Populate Invitation Dropdown (Only with workspaces you OWN)
+            if (data.workspacesCreated && data.workspacesCreated.length > 0) {
+                dropdown.innerHTML = '<option value="">-- Choose a workspace --</option>' +
+                    data.workspacesCreated.map(ws => `<option value="${ws._id}">${ws.name}</option>`).join('');
+                dropdown.disabled = false;
+            } else {
+                dropdown.innerHTML = '<option value="">Create a workspace first</option>';
+                dropdown.disabled = true;
+            }
+
+            // 4. Handle Plan-Based Permissions
+            if (data.package === 'Basic') {
+                shareText.innerText = "Basic Plan cannot share storage.";
+                dropdown.disabled = true;
+                shareInput.disabled = true;
+                inviteBtn.disabled = true;
+                inviteBtn.style.opacity = "0.5";
+            } else {
+                shareText.innerHTML = `<i class="fa-solid fa-check-circle" style="color:var(--success)"></i> ${data.package} Plan: Targeted sharing enabled.`;
+                shareInput.disabled = false;
+                inviteBtn.disabled = false;
+                inviteBtn.style.opacity = "1";
+            }
+
+            // 5. Render Sent Invitations (Track who you invited)
+            const sentList = document.getElementById('sentInvitesList');
+            if (sentList) {
+                if (data.pendingSentInvites && data.pendingSentInvites.length > 0) {
+                    sentList.innerHTML = data.pendingSentInvites.map(inv => {
+                        // Find the name of the workspace using string conversion for IDs
+                        const ws = data.workspacesCreated.find(w => w._id.toString() === inv.workspaceId.toString());
+                        return `
+                    <tr>
+                        <td><i class="fa-solid fa-envelope"></i> ${inv.inviteeEmail}</td>
+                        <td><i class="fa-solid fa-folder-tree"></i> ${ws ? ws.name : 'Shared Workspace'}</td>
+                        <td><span class="badge" style="background:var(--warning); color:white;">Pending</span></td>
+                        <td style="text-align:right;">
+                            <button class="action-btn" style="background:var(--danger); padding: 5px 12px; font-size:0.75rem; border-radius:4px;" 
+                                onclick="revokeInvite('${inv._id}')">
+                                <i class="fa-solid fa-trash-can"></i> Revoke
+                            </button>
+                        </td>
+                    </tr>`;
+                    }).join('');
+                } else {
+                    sentList.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted);">No pending invitations sent.</td></tr>';
+                }
+            }
+        }
+
+        function renderPersonalData(data) {
+            const usedMB = (data.used / (1024 * 1024)).toFixed(2);
+            let limitDisplay = "";
+
+            if (data.package === 'Enterprise') {
+                limitDisplay = "500 GB";
+            } else if (data.package === 'Premium') {
+                limitDisplay = "50 GB";
+            } else {
+                limitDisplay = (data.limit / (1024 * 1024)).toFixed(2) + " MB";
+            }
+
+            document.getElementById('personalStorageText').innerText = `${usedMB} MB / ${limitDisplay}`;
+            const percent = Math.min((data.used / data.limit) * 100, 100);
+            document.getElementById('personalStorageBar').style.width = percent + '%';
+        }
+
+        function renderActivityFeed(activities) {
+            const feed = document.getElementById('activityFeed');
+            if (!activities || activities.length === 0) {
+                feed.innerHTML = '<p style="padding: 20px; text-align: center; color: var(--text-muted);">No recent activity.</p>';
+                return;
+            }
+
+            feed.innerHTML = activities.map(act => {
+                let icon = 'fa-circle-info';
+                let actionText = '';
+
+                if (act.type === 'WORKSPACE_CREATED') { icon = 'fa-folder-plus'; actionText = `created workspace <strong>${act.name}</strong>`; }
+                if (act.type === 'FILE_UPLOADED') { icon = 'fa-file-arrow-up'; actionText = `uploaded <strong>${act.name}</strong>`; }
+                if (act.type === 'INVITE_SENT') { icon = 'fa-paper-plane'; actionText = `sent invite to <strong>${act.name}</strong>`; }
+                if (act.type === 'INVITE_ACCEPTED') { icon = 'fa-check-double'; actionText = `joined workspace via <strong>${act.user}</strong>`; }
+
+                return `
+            <div class="activity-item">
+                <i class="fa-solid ${icon}" style="color: var(--primary); font-size: 0.8rem;"></i>
+                <div style="font-size: 0.85rem;">
+                    <strong>${act.user === document.getElementById('topbar-email').innerText ? 'You' : act.user}</strong> ${actionText}
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">${new Date(act.date).toLocaleString()}</div>
+                </div>
+            </div>`;
+            }).join('');
+        }
+
+        // dashboard.html -> script section
+        async function rejectInvite(inviteId) {
+            if (!confirm("Are you sure you want to decline this workspace invitation?")) return;
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/subscription/reject-invite/${inviteId}`, {
+                    method: 'POST', // Ensure this matches your backend route type
+                    headers: authHeaders
+                });
+                if (res.ok) {
+                    alert("✅ Invitation declined.");
+                    fetchMasterData(); // Refresh the UI immediately
+                } else {
+                    const data = await res.json();
+                    alert("❌ Failed to reject: " + (data.msg || "Unknown error"));
+                }
+            } catch (err) {
+                console.error("Reject Error:", err);
+                alert("Error connecting to server.");
+            }
+        }
+
+        function openWorkspaceModal() {
+            const modal = document.getElementById('createWorkspaceModal');
+            modal.style.display = 'flex';
+            modal.style.visibility = 'visible';
+            modal.style.opacity = '1';
+        }
+
+        async function revokeInvite(inviteId) {
+            if (!confirm("Are you sure you want to cancel this invitation?")) return;
+
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/subscription/revoke-invite/${inviteId}`, {
+                    method: 'DELETE',
+                    headers: authHeaders
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    alert("✅ " + data.msg);
+                    fetchMasterData(); // Refresh the table
+                } else {
+                    alert("❌ " + data.msg);
+                }
+            } catch (err) {
+                alert("Network Error: Could not connect to server.");
+            }
+        }
+
+        function closeWorkspaceModal() { document.getElementById('createWorkspaceModal').style.display = 'none'; }
+        function logout() { localStorage.removeItem('token'); window.location.href = 'login.html'; } 
+    </script>
+</body>
+
+</html>
