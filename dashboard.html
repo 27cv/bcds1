@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BCDS Secure Cloud</title>
+    <script src="https://js.stripe.com/v3/"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
@@ -733,10 +734,10 @@
                     <div id="upgradeButtons" style="display: grid; gap: 10px;">
                         <button class="btn" style="background:#10b981; color:white;"
                             onclick="redirectToStripe('Premium')"><i class="fa-solid fa-credit-card"></i> Upgrade to
-                            Premium (RM15/mo)</button>
+                            Premium (RM40/mo)</button>
                         <button class="btn" style="background:#8b5cf6; color:white;"
                             onclick="redirectToStripe('Enterprise')"><i class="fa-solid fa-building"></i> Upgrade to
-                            Enterprise (RM99/mo)</button>
+                            Enterprise (RM120/mo)</button>
                     </div>
                 </div>
 
@@ -799,6 +800,26 @@
     </main>
 
     <script>
+        // dashboard.js
+
+        const handlePaymentResponse = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+
+            if (urlParams.get('success') === 'true') {
+                // Optional: Show a success toast or notification
+                console.log("Payment successful! Updating account status...");
+
+                // Remove the query parameters from the URL without reloading the page
+                // This prevents the "success" logic from running again if the user refreshes
+                window.history.replaceState({}, document.title, "/dashboard.html");
+
+                // Trigger a fresh fetch of user data to show the new 'Premium' status
+                loadUserStatus();
+            }
+        };
+
+        // Call this on page load
+        handlePaymentResponse();
         const token = localStorage.getItem('token');
         if (!token) window.location.href = 'login.html';
         const authHeaders = { 'x-auth-token': token, 'Content-Type': 'application/json' };
@@ -808,18 +829,35 @@
 
         async function fetchMasterData() {
             try {
-                const res = await fetch('http://127.0.0.1:5001/api/subscription/status', { headers: { 'x-auth-token': token } });
+                const res = await fetch('http://127.0.0.1:5001/api/subscription/status', {
+                    headers: { 'x-auth-token': token }
+                });
                 const data = await res.json();
 
+                // Update Topbar User Info
                 document.getElementById('topbar-email').innerText = data.userEmail;
                 document.getElementById('topbar-avatar').innerText = data.username.charAt(0).toUpperCase();
 
+                // --- NEW: Handle Post-Payment Success Redirect ---
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('success') === 'true') {
+                    // Clean the URL to prevent repeated alerts on refresh
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    alert(`🎉 Success! Your account has been upgraded to ${data.package}.`);
+                }
+
+                // Render UI Components with updated database values
                 renderPersonalData(data);
                 renderWorkspaceHub(data);
                 renderBilling(data);
-                renderActivityFeed(data.activityFeed); // Pass the new feed here
+                renderActivityFeed(data.activityFeed);
+
+                // Load the initial file list for the Personal Drive
                 loadFiles('personal', 'fileListPersonal');
-            } catch (err) { console.error("Master Data Error:", err); }
+
+            } catch (err) {
+                console.error("Master Data Fetch Error:", err);
+            }
         }
 
         function switchTab(tabId) {
@@ -866,8 +904,8 @@
 
             if (!subStatus) return;
 
-            // Set storage allowance text based on plan
-            let totalLimit = data.package === 'Enterprise' ? '500 GB' : (data.package === 'Premium' ? '50 GB' : '50 MB');
+            // UPDATE: Set storage allowance text to match 100GB Premium and 500GB Enterprise logic
+            let totalLimit = data.package === 'Enterprise' ? '500 GB' : (data.package === 'Premium' ? '100 GB' : '50 MB');
 
             subStatus.innerHTML = ` 
         <div style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 5px;">Current Plan</div> 
@@ -875,11 +913,11 @@
         <div style="font-size: 0.9rem; margin-top: 5px; color: var(--text-main);">Total Allowance: <strong>${totalLimit}</strong></div>
     `;
 
-            // NEW: Update the status banner with specific expiry/renewal dates
+            // Update the status banner with specific expiry/renewal dates
             if (data.package === 'Basic') {
                 dateStatus.innerHTML = `<i class="fa-solid fa-infinity"></i> Lifetime Free Basic Tier`;
             } else if (data.subscriptionEnd) {
-                // Formats the date received from the backend
+                // Formats the date received from the backend to en-MY standard
                 const expiryDate = new Date(data.subscriptionEnd).toLocaleDateString('en-MY', {
                     year: 'numeric',
                     month: 'long',
@@ -891,6 +929,7 @@
             }
 
             // --- DYNAMIC BUTTON VISIBILITY ---
+            // Hide upgrade options based on the current active package
             if (data.package === 'Enterprise') {
                 upgradePremiumBtn.style.display = 'none';
                 upgradeEnterpriseBtn.style.display = 'none';
@@ -1025,12 +1064,16 @@
             const formData = new FormData();
             formData.append('file', input.files[0]);
 
+            // Replace the try/catch block inside your handleUpload function
             try {
                 const res = await fetch(`http://127.0.0.1:5001/api/storage/upload?drive=${driveId}`, {
                     method: 'POST',
                     headers: { 'x-auth-token': token },
                     body: formData
                 });
+
+                // Parse the JSON response from the server
+                const data = await res.json();
 
                 if (res.ok) {
                     alert("✅ Encryption Successful: File stored securely in AWS S3");
@@ -1039,11 +1082,12 @@
                     e.target.reset();
                     document.getElementById(isWs ? 'fileNameWorkspace' : 'fileNamePersonal').innerText = '';
                 } else {
-                    alert("❌ Upload Failed");
+                    // Display the specific error message returned by your backend
+                    alert("❌ Upload Failed: " + (data.msg || "Unknown error"));
                 }
             } catch (err) {
                 console.error("Upload Error:", err);
-                alert("❌ Network Error during encryption");
+                alert("❌ Network Error: Could not connect to the encryption server.");
             } finally {
                 // Restore button state
                 btn.innerHTML = originalBtnText;
@@ -1238,24 +1282,32 @@
         }
 
         function renderPersonalData(data) {
+            // data.used is in bytes, convert to MB for the text display
             const usedMB = (data.used / (1024 * 1024)).toFixed(2);
             let limitDisplay = "";
 
+            // DYNAMIC LIMIT DISPLAY FIX
             if (data.package === 'Enterprise') {
                 limitDisplay = "500 GB";
             } else if (data.package === 'Premium') {
-                limitDisplay = "50 GB";
+                limitDisplay = "100 GB";
             } else {
-                limitDisplay = (data.limit / (1024 * 1024)).toFixed(2) + " MB";
+                // Fallback for Basic or specific byte-calculated limits
+                limitDisplay = (data.limit / (1024 * 1024)).toFixed(0) + " MB";
             }
 
+            // Update text: e.g., "15.40 MB / 100 GB"
             document.getElementById('personalStorageText').innerText = `${usedMB} MB / ${limitDisplay}`;
+
+            // Update Progress Bar
             const percent = Math.min((data.used / data.limit) * 100, 100);
             document.getElementById('personalStorageBar').style.width = percent + '%';
         }
 
         function renderActivityFeed(activities) {
             const feed = document.getElementById('activityFeed');
+            const userEmail = document.getElementById('topbar-email').innerText;
+
             if (!activities || activities.length === 0) {
                 feed.innerHTML = '<p style="padding: 20px; text-align: center; color: var(--text-muted);">No recent activity.</p>';
                 return;
@@ -1264,17 +1316,64 @@
             feed.innerHTML = activities.map(act => {
                 let icon = 'fa-circle-info';
                 let actionText = '';
+                let iconColor = 'var(--primary)';
+                let showUser = true;
 
-                if (act.type === 'WORKSPACE_CREATED') { icon = 'fa-folder-plus'; actionText = `created workspace <strong>${act.name}</strong>`; }
-                if (act.type === 'FILE_UPLOADED') { icon = 'fa-file-arrow-up'; actionText = `uploaded <strong>${act.name}</strong>`; }
-                if (act.type === 'INVITE_SENT') { icon = 'fa-paper-plane'; actionText = `sent invite to <strong>${act.name}</strong>`; }
-                if (act.type === 'INVITE_ACCEPTED') { icon = 'fa-check-double'; actionText = `joined workspace via <strong>${act.user}</strong>`; }
+                // --- 1. WORKSPACE ACTIONS ---
+                if (act.type === 'WORKSPACE_CREATED') {
+                    icon = 'fa-folder-plus';
+                    actionText = `created workspace <strong>${act.name || act.details}</strong>`;
+                }
+                else if (act.type === 'WORKSPACE_DELETED') {
+                    icon = 'fa-trash-can';
+                    iconColor = 'var(--danger)';
+                    actionText = `deleted workspace <strong>${act.name || act.details}</strong>`;
+                }
+                else if (act.type === 'LEAVE_WORKSPACE') {
+                    icon = 'fa-person-walking-arrow-right';
+                    iconColor = 'var(--warning)';
+                    actionText = `left workspace <strong>${act.name || act.details}</strong>`;
+                }
+
+                // --- 2. FILE ACTIONS ---
+                else if (act.type === 'FILE_UPLOADED') {
+                    icon = 'fa-file-arrow-up';
+                    iconColor = 'var(--primary)';
+                    actionText = `<strong>${act.details || 'uploaded a file'}</strong>`;
+                }
+                else if (act.type === 'FILE_DELETED') {
+                    icon = 'fa-file-circle-xmark';
+                    iconColor = 'var(--danger)';
+                    actionText = `<strong>${act.details || 'deleted a file'}</strong>`;
+                }
+
+                // --- 3. PAYMENT ACTIONS ---
+                else if (act.type === 'PAYMENT_SUCCESS') {
+                    icon = 'fa-credit-card';
+                    iconColor = 'var(--success)';
+                    actionText = `<strong>${act.details || 'Plan Upgraded Successfully'}</strong>`;
+                    showUser = false;
+                }
+
+                // --- 4. INVITATION ACTIONS ---
+                else if (act.type === 'INVITE_SENT') {
+                    icon = 'fa-paper-plane';
+                    actionText = `sent invite to <strong>${act.name || act.details}</strong>`;
+                }
+                else if (act.type === 'INVITE_ACCEPTED') {
+                    icon = 'fa-check-double';
+                    iconColor = 'var(--success)';
+                    actionText = `<strong>${act.name || act.details || 'via invitation'}</strong>`;
+                    showUser = false;
+                }
+
+                const displayUser = act.user === userEmail ? 'You' : act.user;
 
                 return `
             <div class="activity-item">
-                <i class="fa-solid ${icon}" style="color: var(--primary); font-size: 0.8rem;"></i>
+                <i class="fa-solid ${icon}" style="color: ${iconColor}; font-size: 0.8rem;"></i>
                 <div style="font-size: 0.85rem;">
-                    <strong>${act.user === document.getElementById('topbar-email').innerText ? 'You' : act.user}</strong> ${actionText}
+                    ${showUser ? `<strong>${displayUser}</strong> ` : ''}${actionText}
                     <div style="font-size: 0.7rem; color: var(--text-muted);">${new Date(act.date).toLocaleString()}</div>
                 </div>
             </div>`;
@@ -1327,6 +1426,71 @@
                 }
             } catch (err) {
                 alert("Network Error: Could not connect to server.");
+            }
+        }
+
+        async function redirectToStripe(planName) {
+            try {
+                const res = await fetch('http://127.0.0.1:5001/api/subscription/create-checkout', {
+                    method: 'POST',
+                    headers: authHeaders,
+                    body: JSON.stringify({ plan: planName })
+                });
+                const session = await res.json();
+
+                // Redirect to Stripe Checkout
+                const stripe = Stripe('pk_test_51T5fH0GpYkDBDjPdFyxefQPFcBVvaXwrKCgCD7qps9zwGlOWlxXx1Ov8nqNMduSPCech45P2zjiIcthGFYn5gPfa001BlMPhLG');
+                await stripe.redirectToCheckout({ sessionId: session.id });
+            } catch (err) {
+                alert("Payment Error: " + err.message);
+            }
+        }
+        async function loadUserStatus() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/subscription/status', {
+                    headers: { 'x-auth-token': token }
+                });
+                const data = await res.json();
+
+                // Update UI elements
+                document.getElementById('plan-name').innerText = data.package;
+                document.getElementById('storage-limit').innerText = `${(data.limit / 1024 / 1024).toFixed(0)} MB`;
+
+                // Calculate storage percentage for the progress bar
+                const percent = (data.used / data.limit) * 100;
+                document.getElementById('storage-bar').style.width = `${percent}%`;
+
+            } catch (err) {
+                console.error("Failed to load user status", err);
+            }
+        }
+
+        async function leaveCurrentWorkspace() {
+            if (!confirm("Are you sure you want to leave this team workspace? You will need a new invite to rejoin.")) return;
+
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/subscription/leave-workspace/${currentWorkspaceId}`, {
+                    method: 'POST',
+                    headers: authHeaders
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert("✅ " + data.msg);
+                    switchTab('workspaces'); // Go back to the main hub
+                    fetchMasterData(); // Refresh the list
+                } else {
+                    alert("❌ Error: " + data.msg);
+                }
+            } catch (err) {
+                alert("❌ Network Error: Could not contact server.");
             }
         }
 

@@ -6,6 +6,7 @@ const FileModel = require('../models/File'); // Renamed to avoid TypeError
 const Invitation = require('../models/Invitation');
 const Activity = require('../models/Activity');
 const AWS = require('aws-sdk');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const s3 = new AWS.S3({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -15,6 +16,7 @@ const s3 = new AWS.S3({
 
 // @route   GET /api/subscription/status
 router.get('/status', auth, async (req, res) => {
+    
     try {
         const user = await User.findById(req.user.id);
         const userEmail = user.email.toLowerCase().trim();
@@ -51,7 +53,13 @@ router.get('/status', auth, async (req, res) => {
 
         // 3. FETCH PERSISTENT ACTIVITY FEED
         // This pulls from the Activity collection to ensure 28 vs 27 is correct
-        const activityFeedRaw = await Activity.find({ userId: req.user.id })
+        // 2. UPDATED LOGIC: Pull logs for user OR actions in their owned workspaces
+        const activityFeedRaw = await Activity.find({ 
+            $or: [
+                { userId: req.user.id },
+                { details: { $regex: user.username, $options: 'i' } } 
+            ] 
+        })
             .sort({ date: -1 })
             .limit(10);
 
@@ -88,41 +96,73 @@ router.get('/status', auth, async (req, res) => {
 });
 
 // --- UPDATED WORKSPACE CREATION WITH LOGGING ---
+// @route   POST /api/subscription/workspaces
 router.post('/workspaces', auth, async (req, res) => {
     const { name, allocateGB } = req.body;
     try {
         const user = await User.findById(req.user.id);
         
+        if (user.package === 'Basic') {
+            return res.status(403).json({ msg: "Upgrade required to create workspaces." });
+        }
+
+        // 1. UNIQUE NAME CHECK: Prevent duplicate workspace names for this user
+        const workspaceName = name.trim();
+        const nameExists = user.workspacesCreated.some(
+            ws => ws.name.toLowerCase() === workspaceName.toLowerCase()
+        );
+
+        if (nameExists) {
+            return res.status(400).json({ 
+                msg: `A workspace named "${workspaceName}" already exists. Please choose a different name.` 
+            });
+        }
+    
+        // 2. AWS S3: Create unique folder
         await s3.putObject({
             Bucket: process.env.AWS_BUCKET_NAME,
-            Key: `${user.email}/${name.trim()}/`
+            Key: `${user.email}/${workspaceName}/`
         }).promise();
 
+        // 3. Database: Save workspace details
         user.workspacesCreated.push({
-            name: name.trim(),
+            name: workspaceName,
             allocatedBytes: (parseInt(allocateGB) || 1) * 1024 * 1024 * 1024
         });
 
         await user.save();
 
-        // PERSISTENT LOG
+        // 4. Activity Log
         await new Activity({
             userId: req.user.id,
             type: 'WORKSPACE_CREATED',
-            details: `Created workspace "${name}"`
+            details: `Created workspace "${workspaceName}"`
         }).save();
 
-        res.json({ msg: "Workspace Created!" });
-    } catch (err) { res.status(400).json({ msg: err.message }); }
+        res.json({ msg: "Workspace Created Successfully!" });
+    } catch (err) { 
+        res.status(400).json({ msg: err.message }); 
+    }
 });
 
 // @route   POST /api/subscription/share
 router.post('/share', auth, async (req, res) => {
     const { emailToShare, workspaceId } = req.body;
     try {
+        // 1. Fetch the current user (the inviter)
+        const user = await User.findById(req.user.id);
+        
+        // 2. Define the invitee email first
         const inviteeEmail = emailToShare.toLowerCase().trim();
 
-        // Check for existing pending invite to prevent duplication
+        // 3. NOW you can check if they are the same
+        if (inviteeEmail === user.email.toLowerCase()) {
+            return res.status(400).json({ 
+                msg: "You cannot invite yourself to your own workspace." 
+            });
+        }
+
+        // 4. Check for existing pending invites
         const existingInvite = await Invitation.findOne({
             inviteeEmail,
             workspaceId,
@@ -133,14 +173,20 @@ router.post('/share', auth, async (req, res) => {
             return res.status(400).json({ msg: "A pending invitation already exists for this user." });
         }
 
+        // 5. Save the new invitation
         const newInvite = new Invitation({
             inviter: req.user.id,
             inviteeEmail,
             workspaceId
         });
+        
         await newInvite.save();
         res.json({ msg: "Invite sent successfully!" });
-    } catch (err) { res.status(500).send('Server Error'); }
+
+    } catch (err) { 
+        console.error("Invite Error:", err);
+        res.status(500).send('Server Error'); 
+    }
 });
 
 // @route   POST /api/subscription/accept-invite/:id
@@ -172,40 +218,74 @@ router.post('/accept-invite/:id', auth, async (req, res) => {
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
+
+
 // @route   DELETE /api/subscription/workspaces/:id
 router.delete('/workspaces/:id', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
         const workspace = user.workspacesCreated.id(req.params.id);
 
-        if (!workspace) return res.status(404).json({ msg: "Workspace not found" });
-
-        const folderPath = `${user.email}/${workspace.name}/`;
-
-        // 1. AWS: List all objects in the workspace folder
-        const listedObjects = await s3.listObjectsV2({
-            Bucket: process.env.AWS_BUCKET_NAME,
-            Prefix: folderPath
-        }).promise();
-
-        // 2. AWS: Delete all objects found in that folder
-        if (listedObjects.Contents.length > 0) {
-            const deleteParams = {
-                Bucket: process.env.AWS_BUCKET_NAME,
-                Delete: { Objects: listedObjects.Contents.map(obj => ({ Key: obj.Key })) }
-            };
-            await s3.deleteObjects(deleteParams).promise();
+        if (!workspace) {
+            return res.status(404).json({ msg: "Workspace not found" });
         }
 
-        // 3. Database: Remove file records and the workspace itself
-        await FileModel.deleteMany({ owner: user._id, workspaceId: req.params.id });
+        const wsName = workspace.name;
+
+        // 1. Identify files to reclaim storage
+        const filesInWorkspace = await FileModel.find({ 
+            owner: user._id, 
+            workspaceId: req.params.id 
+        });
+        const totalReclaimedBytes = filesInWorkspace.reduce((acc, file) => acc + file.fileSize, 0);
+
+        // 2. AWS S3: Purge the folder
+        try {
+            const folderPath = `${user.email}/${wsName}/`;
+            const listedObjects = await s3.listObjectsV2({
+                Bucket: process.env.AWS_BUCKET_NAME,
+                Prefix: folderPath
+            }).promise();
+
+            if (listedObjects.Contents && listedObjects.Contents.length > 0) {
+                await s3.deleteObjects({
+                    Bucket: process.env.AWS_BUCKET_NAME,
+                    Delete: { Objects: listedObjects.Contents.map(obj => ({ Key: obj.Key })) }
+                }).promise();
+            }
+        } catch (s3Err) {
+            console.warn("S3 Cleanup skipped (folder might be empty)");
+        }
+
+        // 3. Database Updates
+        await FileModel.deleteMany({ workspaceId: req.params.id }); // Clean up all files in workspace
+        
+        // FIX: Remove this workspace ID from EVERY user who joined it
+        await User.updateMany(
+            { workspacesJoined: req.params.id },
+            { $pull: { workspacesJoined: req.params.id } }
+        );
+
         user.workspacesCreated.pull({ _id: req.params.id });
+        user.storageUsed = Math.max(0, user.storageUsed - totalReclaimedBytes);
         await user.save();
 
-        res.json({ msg: "Workspace and AWS folder purged successfully" });
+        // 4. Activity Log
+        try {
+            await new Activity({
+                userId: req.user.id,
+                type: 'WORKSPACE_DELETED',
+                details: `"${wsName}"`
+            }).save();
+        } catch (logErr) {
+            console.error("Activity logging failed, but data was deleted.");
+        }
+
+        return res.status(200).json({ msg: "Workspace purged successfully!" });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        console.error("CRITICAL DELETE ERROR:", err);
+        return res.status(500).json({ msg: "Server error during deletion" });
     }
 });
 
@@ -249,6 +329,91 @@ router.post('/reject-invite/:id', auth, async (req, res) => {
 
         res.json({ msg: "Invitation declined." });
     } catch (err) { res.status(500).send('Server Error'); }
+});
+
+// @route   POST /api/subscription/create-checkout
+router.post('/create-checkout', auth, async (req, res) => {
+    const { plan } = req.body; 
+    const prices = { 
+        'Premium': 'price_1T7A06GpYkDBDjPdPOFenoj4', 
+        'Enterprise': 'price_1T7A0LGpYkDBDjPdUxdXFBUu' 
+    };
+
+    const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{ price: prices[plan], quantity: 1 }],
+        mode: 'subscription',
+        // FIX: Send the plan name so the webhook can read it
+        metadata: {
+            planName: plan 
+        },
+        success_url: 'http://localhost:5500/dashboard.html?success=true',
+        cancel_url: 'http://localhost:5500/dashboard.html?canceled=true',
+        client_reference_id: req.user.id
+    });
+
+    res.json({ id: session.id });
+});
+
+// @route   POST /api/subscription/customer-portal
+router.post('/customer-portal', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+
+        if (!user.stripeCustomerId) {
+            return res.status(400).json({ msg: "No active subscription found." });
+        }
+
+        // Create a portal session
+        const session = await stripe.billingPortal.sessions.create({
+            customer: user.stripeCustomerId,
+            return_url: 'http://localhost:5500/dashboard.html',
+        });
+
+        res.json({ url: session.url });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   POST /api/subscription/leave-workspace/:id
+router.post('/leave-workspace/:id', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        
+        // Find the workspace name for the log before removing access
+        const owner = await User.findOne({ "workspacesCreated._id": req.params.id });
+        const workspace = owner ? owner.workspacesCreated.id(req.params.id) : null;
+        const wsName = workspace ? workspace.name : "Shared Workspace";
+
+        if (!user.workspacesJoined.includes(req.params.id)) {
+            return res.status(400).json({ msg: "You are not a member of this workspace." });
+        }
+
+        // Remove workspace from user's joined list
+        user.workspacesJoined.pull(req.params.id);
+        await user.save();
+
+        // STEP 2: Safe Logging (Prevents server crash if Activity has issues)
+        try {
+            await new Activity({
+                userId: req.user.id,
+                type: 'LEAVE_WORKSPACE',
+                details: `"${wsName}"`
+            }).save();
+        } catch (logErr) {
+            // This message appears in your terminal if logging fails, but the user still leaves
+            console.log("Activity logging failed, but data was deleted."); 
+        }
+
+        // STEP 3: Always send a JSON response to stop the "Network Error" popup
+        return res.status(200).json({ msg: `Successfully left "${wsName}"` });
+
+    } catch (err) {
+        console.error("LEAVE ERROR:", err);
+        res.status(500).json({ msg: "Server Error" });
+    }
 });
 
 module.exports = router;
