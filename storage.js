@@ -6,6 +6,16 @@ const File = require('../models/File');
 const Activity = require('../models/Activity'); // FIX: Added missing import
 const multer = require('multer');
 const AWS = require('aws-sdk');
+const { logToBlockchain } = require('./blockchain'); // Add this near your imports
+const { ethers } = require('ethers');
+const fs = require('fs');
+
+// Connect to Ganache
+const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:7545";
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+// For reading data, we don't even need a private key!
+const contractABI = JSON.parse(fs.readFileSync('./contractABI.json', 'utf8'));
+const aclContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, contractABI, provider);
 
 const s3 = new AWS.S3({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -20,17 +30,20 @@ async function getTargetDrive(req) {
 
     if (driveId === 'personal') return requestingUser;
 
+    // Check if the user owns the workspace
     const owned = requestingUser.workspacesCreated.id(driveId);
     if (owned) return requestingUser;
 
+    // Check if the user has joined the workspace
     const isJoined = requestingUser.workspacesJoined.includes(driveId);
     if (isJoined) {
+        // We need to find the user who actually owns this workspace ID
         const owner = await User.findOne({ "workspacesCreated._id": driveId });
         if (!owner) throw { status: 404, msg: "Workspace no longer exists." };
         return owner;
     }
 
-    throw { status: 403, msg: "Unauthorized: You do not have access to this folder." };
+    throw { status: 403, msg: "Unauthorized: Access denied by system." };
 }
 
 // routes/storage.js
@@ -51,7 +64,7 @@ router.post('/upload', [auth, upload.single('file')], async (req, res) => {
         // 3. Determine Folder Path & Location Name
         let folderPath = 'personal';
         let locationName = "Personal Drive";
-        
+
         if (driveId !== 'personal') {
             const workspace = targetOwner.workspacesCreated.id(driveId);
             folderPath = workspace ? workspace.name : 'UnknownWorkspace';
@@ -79,6 +92,15 @@ router.post('/upload', [auth, upload.single('file')], async (req, res) => {
         });
 
         await newFile.save();
+
+        // ---> NEW: 5.5 LOG TO BLOCKCHAIN <---
+        try {
+            await logToBlockchain(newFile._id.toString());
+            console.log(`⛓️ Block mined successfully for file: ${newFile.fileName}`);
+        } catch (chainErr) {
+            console.error("Blockchain logging failed:", chainErr.message);
+            // We log the error but don't stop the upload process
+        }
 
         // 6. Update Owner Storage Usage
         targetOwner.storageUsed += req.file.size;
@@ -174,16 +196,46 @@ router.get('/download/:id', auth, async (req, res) => {
         const file = await File.findById(req.params.id);
         if (!file) return res.status(404).json({ msg: "File not found" });
 
+        // --- BLOCKCHAIN ACCESS CONTROL ENFORCEMENT ---
+        if (file.workspaceId) {
+            console.log(`Checking Blockchain: Workspace ${file.workspaceId} | User ${req.user.id}`);
+            
+            // 1. Get status from Smart Contract
+            const hasAccess = await aclContract.checkAccess(
+                file.workspaceId.toString(), 
+                req.user.id.toString()
+            );
+
+            // 2. Check if user is the Owner (Owners bypass ACL usually)
+            const isOwner = file.owner.toString() === req.user.id.toString();
+
+            if (!isOwner && !hasAccess) {
+                console.log("❌ Blockchain Denied Access.");
+                return res.status(403).json({ 
+                    msg: "Blockchain ACL Denied: Access revoked or not granted on-chain." 
+                });
+            }
+            console.log("✅ Blockchain Granted Access.");
+        }
+
+        // --- AWS S3 STREAMING ---
         const params = {
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: file.s3Key
         };
 
         const fileStream = s3.getObject(params).createReadStream();
+        
+        fileStream.on('error', (err) => {
+            console.error("S3 Stream Error:", err);
+            res.status(404).json({ msg: "File not found in S3" });
+        });
+
         res.attachment(file.fileName);
         fileStream.pipe(res);
+
     } catch (err) {
-        console.error(err);
+        console.error("Download Error:", err);
         res.status(500).send('Server Error');
     }
 });

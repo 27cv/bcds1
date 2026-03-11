@@ -465,6 +465,8 @@
             <a class="nav-item" id="nav-workspaces" onclick="switchTab('workspaces')"><i
                     class="fa-solid fa-network-wired"></i> Workspaces <span id="inviteBadge" class="badge"
                     style="display:none;">0</span></a>
+            <a class="nav-item" id="nav-ledger" onclick="switchTab('ledger'); fetchLedger();"><i
+                    class="fa-solid fa-link"></i> Blockchain Ledger</a>
             <a class="nav-item" id="nav-profile" onclick="switchTab('profile')"><i class="fa-solid fa-user-gear"></i>
                 Account & Billing</a>
         </div>
@@ -762,6 +764,33 @@
                 </div>
             </div>
         </div>
+        <div id="ledger-view" class="view-section">
+            <div class="card full-width">
+                <div class="card-header"><i class="fa-solid fa-link" style="color: var(--primary);"></i> Immutable Audit
+                    Ledger</div>
+                <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 20px;">
+                    Every file uploaded is cryptographically hashed and linked. This proves data integrity and
+                    timestamps.
+                </p>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Block #</th>
+                                <th>Timestamp</th>
+                                <th>File ID (Hashed)</th>
+                                <th>Block Hash</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ledgerList">
+                            <tr>
+                                <td colspan="4" style="text-align:center;">Loading ledger...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
         <div id="createWorkspaceModal" class="modal">
             <div class="modal-content" style="max-width: 450px;">
                 <span class="close-modal" onclick="closeWorkspaceModal()">&times;</span>
@@ -860,7 +889,7 @@
             document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
             document.getElementById(`${tabId}-view`).classList.add('active');
             document.getElementById(`nav-${tabId}`)?.classList.add('active');
-            document.getElementById('topbar-title').innerText = tabId === 'personal' ? 'My Personal Drive' : 'Team Workspaces';
+            document.getElementById('topbar-title').innerText = tabId === 'personal' ? 'My Personal Drive' : tabId === 'workspaces' ? 'Team Workspaces' : tabId === 'profile' ? 'Account & Billing' : 'Blockchain Ledger';
         }
 
         function openWorkspace(id, displayName, isOwner) {
@@ -979,47 +1008,63 @@
 
         async function acceptInvite(inviteId) {
             try {
+                // Change button state to "processing" if you can, 
+                // because Blockchain transactions take 2-5 seconds.
+                console.log("Accepting invite... please wait for Blockchain sync.");
+
                 const res = await fetch(`http://127.0.0.1:5001/api/subscription/accept-invite/${inviteId}`, {
                     method: 'POST',
-                    headers: authHeaders
+                    headers: {
+                        'x-auth-token': localStorage.getItem('token'),
+                        'Content-Type': 'application/json'
+                    }
                 });
+
+                const data = await res.json();
+
                 if (res.ok) {
-                    alert("✅ Successfully joined workspace!");
-                    fetchMasterData();
+                    alert("✅ Success: Joined workspace and secured on-chain!");
+                    fetchMasterData(); // Refresh the UI
+                } else {
+                    // This will tell you if the Private Key or Contract Address is wrong
+                    alert("❌ Failed to join: " + (data.msg || "Server Error"));
                 }
-            } catch (err) { alert("Network Error"); }
+            } catch (err) {
+                console.error("Accept Error:", err);
+                alert("Network Error: Is Ganache running and the backend connected?");
+            }
         }
 
         async function deleteOwnedWorkspace() {
-    // 1. Double check we actually have an ID
-    if (!currentWorkspaceId) {
-        return alert("Error: No workspace selected.");
-    }
-
-    if (!confirm("CRITICAL: Permanently delete this workspace and reclaim your GBs?")) return;
-
-    try {
-        const res = await fetch(`http://127.0.0.1:5001/api/subscription/workspaces/${currentWorkspaceId}`, {
-            method: 'DELETE',
-            headers: { 
-                'x-auth-token': localStorage.getItem('token'),
-                'Content-Type': 'application/json'
+            // 1. Double check we actually have an ID
+            if (!currentWorkspaceId) {
+                return alert("Error: No workspace selected.");
             }
-        });
 
-        const data = await res.json();
+            if (!confirm("CRITICAL: Permanently delete this workspace and reclaim your GBs?")) return;
 
-        if (res.ok) {
-            alert("✅ Success: " + data.msg);
-            switchTab('workspaces'); // Go back to hub
-            fetchMasterData(); // Refresh storage bars and list
-        } else {
-            alert("❌ Failed: " + data.msg);
+            try {
+                const res = await fetch(`http://127.0.0.1:5001/api/subscription/workspaces/${currentWorkspaceId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'x-auth-token': localStorage.getItem('token'),
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert("✅ Success: " + data.msg);
+                    switchTab('workspaces'); // Go back to hub
+                    fetchMasterData(); // Refresh storage bars and list
+                } else {
+                    alert("❌ Failed: " + data.msg);
+                }
+            } catch (err) {
+                alert("❌ Network Error: Could not reach server.");
+            }
         }
-    } catch (err) {
-        alert("❌ Network Error: Could not reach server.");
-    }
-}
 
         async function loadFiles(driveId, targetBodyId) {
             const listBody = document.getElementById(targetBodyId);
@@ -1311,8 +1356,8 @@
 
         function renderActivityFeed(activities) {
             const feed = document.getElementById('activityFeed');
-            const userEmail = document.getElementById('topbar-email').innerText;
 
+            // If no activities, show empty state
             if (!activities || activities.length === 0) {
                 feed.innerHTML = '<p style="padding: 20px; text-align: center; color: var(--text-muted);">No recent activity.</p>';
                 return;
@@ -1320,65 +1365,55 @@
 
             feed.innerHTML = activities.map(act => {
                 let icon = 'fa-circle-info';
-                let actionText = '';
                 let iconColor = 'var(--primary)';
-                let showUser = true;
+                let actionText = act.name || act.details || '';
 
-                // --- 1. WORKSPACE ACTIONS ---
+                // --- 1. SET ICONS & COLORS BASED ON TYPE ---
                 if (act.type === 'WORKSPACE_CREATED') {
                     icon = 'fa-folder-plus';
-                    actionText = `created workspace <strong>${act.name || act.details}</strong>`;
+                    actionText = `Created workspace <strong>${act.name}</strong>`;
                 }
                 else if (act.type === 'WORKSPACE_DELETED') {
                     icon = 'fa-trash-can';
                     iconColor = 'var(--danger)';
-                    actionText = `deleted workspace <strong>${act.name || act.details}</strong>`;
+                    actionText = `Deleted workspace <strong>${act.name}</strong>`;
                 }
                 else if (act.type === 'LEAVE_WORKSPACE') {
                     icon = 'fa-person-walking-arrow-right';
                     iconColor = 'var(--warning)';
-                    actionText = `left workspace <strong>${act.name || act.details}</strong>`;
+                    actionText = `Left workspace <strong>${act.name}</strong>`;
                 }
-
-                // --- 2. FILE ACTIONS ---
                 else if (act.type === 'FILE_UPLOADED') {
                     icon = 'fa-file-arrow-up';
-                    iconColor = 'var(--primary)';
-                    actionText = `<strong>${act.details || 'uploaded a file'}</strong>`;
+                    actionText = `Uploaded <strong>${act.name}</strong>`;
                 }
                 else if (act.type === 'FILE_DELETED') {
                     icon = 'fa-file-circle-xmark';
                     iconColor = 'var(--danger)';
-                    actionText = `<strong>${act.details || 'deleted a file'}</strong>`;
+                    actionText = `Deleted <strong>${act.name}</strong>`;
                 }
-
-                // --- 3. PAYMENT ACTIONS ---
                 else if (act.type === 'PAYMENT_SUCCESS') {
                     icon = 'fa-credit-card';
                     iconColor = 'var(--success)';
-                    actionText = `<strong>${act.details || 'Plan Upgraded Successfully'}</strong>`;
-                    showUser = false;
+                    actionText = `<strong>Plan Upgraded Successfully</strong>`;
                 }
-
-                // --- 4. INVITATION ACTIONS ---
                 else if (act.type === 'INVITE_SENT') {
                     icon = 'fa-paper-plane';
-                    actionText = `sent invite to <strong>${act.name || act.details}</strong>`;
+                    actionText = `Sent invite to <strong>${act.name}</strong>`;
                 }
                 else if (act.type === 'INVITE_ACCEPTED') {
                     icon = 'fa-check-double';
                     iconColor = 'var(--success)';
-                    actionText = `<strong>${act.name || act.details || 'via invitation'}</strong>`;
-                    showUser = false;
+                    actionText = `Joined workspace <strong>${act.name}</strong>`;
                 }
 
-                const displayUser = act.user === userEmail ? 'You' : act.user;
-
+                // Since the backend is now strictly filtered by userId,
+                // we can safely refer to the actor as "You" for all these items.
                 return `
             <div class="activity-item">
                 <i class="fa-solid ${icon}" style="color: ${iconColor}; font-size: 0.8rem;"></i>
                 <div style="font-size: 0.85rem;">
-                    ${showUser ? `<strong>${displayUser}</strong> ` : ''}${actionText}
+                    <strong>You</strong> ${actionText}
                     <div style="font-size: 0.7rem; color: var(--text-muted);">${new Date(act.date).toLocaleString()}</div>
                 </div>
             </div>`;
@@ -1513,6 +1548,37 @@
                 }
             } catch (err) {
                 alert("❌ Network Error: Could not contact server.");
+            }
+        }
+
+        async function fetchLedger() {
+            try {
+                const res = await fetch('http://127.0.0.1:5001/api/blockchain/chain', {
+                    headers: authHeaders
+                });
+                const chain = await res.json();
+
+                const list = document.getElementById('ledgerList');
+                if (chain.length === 0) {
+                    list.innerHTML = '<tr><td colspan="4" style="text-align:center;">Ledger is empty.</td></tr>';
+                    return;
+                }
+
+                // Inside dashboard.html script -> fetchLedger() function
+                list.innerHTML = chain.reverse().map(block => `
+    <tr>
+        <td><span class="badge" style="background:var(--workspace)">${block.index}</span></td>
+        <td style="font-size: 0.8rem; color: var(--text-muted);">${new Date(block.timestamp).toLocaleString()}</td>
+        <td style="font-family: monospace; font-size: 0.8rem;" title="${block.fileHash}">
+            ${block.fileHash.substring(0, 16)}...
+        </td>
+        <td style="font-family: monospace; font-size: 0.8rem; color: var(--primary);" title="Ethereum Network Receipt">
+            ${block.ethTxHash !== "0x0" ? block.ethTxHash.substring(0, 16) + '...' : 'Genesis'}
+        </td>
+    </tr>
+`).join('');
+            } catch (err) {
+                console.error("Ledger Fetch Error:", err);
             }
         }
 

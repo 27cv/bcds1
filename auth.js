@@ -60,4 +60,15 @@ router.post('/reset-password', auth, async (req, res) => {
     } catch (err) { res.status(500).send("Server Error"); }
 });
 
+// @route   GET /api/auth/user
+// @desc    Get logged in user data (used to show the correct name on the dashboard)
+router.get('/user', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password');
+        res.json(user);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
+});
+
 module.exports = router;

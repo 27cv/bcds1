@@ -5,6 +5,9 @@ const UserSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
 
+    // Allows MongoDB to save the Stripe connection
+    stripeCustomerId: { type: String, default: null },
+
     // Subscription & Storage
     package: { type: String, default: 'Basic' },
     storageLimit: { type: Number, default: 52428800 }, // EXACTLY 50MB in bytes
