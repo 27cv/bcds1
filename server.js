@@ -7,7 +7,7 @@ const app = express();
 
 // --- 1. STRIPE WEBHOOK (MUST BE BEFORE express.json()) ---
 
-app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
     let event;
@@ -22,25 +22,34 @@ app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), a
     const User = require('./models/User');
     const Activity = require('./models/Activity');
 
+    // In server.js - Webhook handler
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
+
+        // Use the client_reference_id we passed during checkout creation
         const userId = session.client_reference_id;
         const purchasedPlan = session.metadata.planName;
 
         const user = await User.findById(userId);
         if (user) {
-            user.stripeCustomerId = session.customer;
             user.package = purchasedPlan;
-            // Precise byte calculation
-            user.storageLimit = purchasedPlan === 'Enterprise' ? 500 * 1024 * 1024 * 1024 : 100 * 1024 * 1024 * 1024;
-            
+
+            // Match the byte logic in your User.js model
+            if (purchasedPlan === 'Premium') {
+                user.storageLimit = 100 * 1024 * 1024 * 1024; // 100GB
+            } else if (purchasedPlan === 'Enterprise') {
+                user.storageLimit = 500 * 1024 * 1024 * 1024; // 500GB
+            }
+
+            user.stripeCustomerId = session.customer;
             await user.save();
+
+            // Create the activity log
             await new Activity({
                 userId: user._id,
                 type: 'PAYMENT_SUCCESS',
                 details: `Upgraded to ${purchasedPlan}`
             }).save();
-            console.log(`⭐ Plan updated for user: ${user.email}`);
         }
     }
 
@@ -55,14 +64,14 @@ app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), a
         }
     }
 
-    res.json({received: true});
+    res.json({ received: true });
 });
 
 // --- 2. MIDDLEWARE ---
-app.use(express.json()); 
+app.use(express.json());
 app.use(cors({
-    origin: '*', 
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], 
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
 }));
 
@@ -74,10 +83,10 @@ app.use('/api/subscription', require('./routes/subscription'));
 
 // --- 4. DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)
-.then(() => console.log("✅ MongoDB Connected"))
-.catch(err => {
-    console.error("❌ MongoDB Connection Error:", err.message);
-});
+    .then(() => console.log("✅ MongoDB Connected"))
+    .catch(err => {
+        console.error("❌ MongoDB Connection Error:", err.message);
+    });
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
