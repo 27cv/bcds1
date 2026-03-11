@@ -97,6 +97,7 @@ router.get('/status', auth, async (req, res) => {
 
 // --- UPDATED WORKSPACE CREATION WITH LOGGING ---
 // @route   POST /api/subscription/workspaces
+// @route   POST /api/subscription/workspaces
 router.post('/workspaces', auth, async (req, res) => {
     const { name, allocateGB } = req.body;
     try {
@@ -106,37 +107,45 @@ router.post('/workspaces', auth, async (req, res) => {
             return res.status(403).json({ msg: "Upgrade required to create workspaces." });
         }
 
-        // 1. UNIQUE NAME CHECK: Prevent duplicate workspace names for this user
-        const workspaceName = name.trim();
-        const nameExists = user.workspacesCreated.some(
-            ws => ws.name.toLowerCase() === workspaceName.toLowerCase()
-        );
+        const requestedBytes = (parseInt(allocateGB) || 1) * 1024 * 1024 * 1024;
 
-        if (nameExists) {
+        // --- NEW QUOTA CALCULATION ---
+        // Sum up bytes already allocated to other workspaces
+        const alreadyAllocated = user.workspacesCreated.reduce((acc, ws) => acc + ws.allocatedBytes, 0);
+        const remainingQuota = user.storageLimit - alreadyAllocated;
+
+        if (requestedBytes > remainingQuota) {
+            const remainingGB = (remainingQuota / (1024 * 1024 * 1024)).toFixed(2);
             return res.status(400).json({ 
-                msg: `A workspace named "${workspaceName}" already exists. Please choose a different name.` 
+                msg: `Insufficient quota. You only have ${remainingGB} GB remaining.` 
             });
         }
+
+        // --- UNIQUE NAME CHECK ---
+        const workspaceName = name.trim();
+        if (user.workspacesCreated.some(ws => ws.name.toLowerCase() === workspaceName.toLowerCase())) {
+            return res.status(400).json({ msg: `Workspace "${workspaceName}" already exists.` });
+        }
     
-        // 2. AWS S3: Create unique folder
+        // AWS S3: Create unique folder
         await s3.putObject({
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: `${user.email}/${workspaceName}/`
         }).promise();
 
-        // 3. Database: Save workspace details
+        // Database: Save workspace details
         user.workspacesCreated.push({
             name: workspaceName,
-            allocatedBytes: (parseInt(allocateGB) || 1) * 1024 * 1024 * 1024
+            allocatedBytes: requestedBytes
         });
 
         await user.save();
 
-        // 4. Activity Log
+        // Activity Log
         await new Activity({
             userId: req.user.id,
             type: 'WORKSPACE_CREATED',
-            details: `Created workspace "${workspaceName}"`
+            details: `Created workspace "${workspaceName}" with ${allocateGB}GB`
         }).save();
 
         res.json({ msg: "Workspace Created Successfully!" });
@@ -220,72 +229,47 @@ router.post('/accept-invite/:id', auth, async (req, res) => {
 
 
 
-// @route   DELETE /api/subscription/workspaces/:id
+// routes/subscription.js
 router.delete('/workspaces/:id', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
+        // This finds the sub-document by the ID passed from the frontend
         const workspace = user.workspacesCreated.id(req.params.id);
 
         if (!workspace) {
-            return res.status(404).json({ msg: "Workspace not found" });
+            return res.status(404).json({ msg: "Workspace record not found in your account." });
         }
 
         const wsName = workspace.name;
 
-        // 1. Identify files to reclaim storage
-        const filesInWorkspace = await FileModel.find({ 
-            owner: user._id, 
-            workspaceId: req.params.id 
-        });
-        const totalReclaimedBytes = filesInWorkspace.reduce((acc, file) => acc + file.fileSize, 0);
-
-        // 2. AWS S3: Purge the folder
+        // 1. AWS S3: Clean up the cloud folder first
         try {
             const folderPath = `${user.email}/${wsName}/`;
-            const listedObjects = await s3.listObjectsV2({
-                Bucket: process.env.AWS_BUCKET_NAME,
-                Prefix: folderPath
-            }).promise();
-
-            if (listedObjects.Contents && listedObjects.Contents.length > 0) {
+            const objects = await s3.listObjectsV2({ Bucket: process.env.AWS_BUCKET_NAME, Prefix: folderPath }).promise();
+            
+            if (objects.Contents.length > 0) {
                 await s3.deleteObjects({
                     Bucket: process.env.AWS_BUCKET_NAME,
-                    Delete: { Objects: listedObjects.Contents.map(obj => ({ Key: obj.Key })) }
+                    Delete: { Objects: objects.Contents.map(o => ({ Key: o.Key })) }
                 }).promise();
             }
         } catch (s3Err) {
-            console.warn("S3 Cleanup skipped (folder might be empty)");
+            console.warn("S3 folder already empty or missing.");
         }
 
-        // 3. Database Updates
-        await FileModel.deleteMany({ workspaceId: req.params.id }); // Clean up all files in workspace
-        
-        // FIX: Remove this workspace ID from EVERY user who joined it
+        // 2. Database: Reclaim the quota and remove the workspace
+        user.workspacesCreated.pull({ _id: req.params.id });
+        await user.save();
+
+        // 3. Global Cleanup: Remove access for anyone you invited to THIS workspace
         await User.updateMany(
             { workspacesJoined: req.params.id },
             { $pull: { workspacesJoined: req.params.id } }
         );
 
-        user.workspacesCreated.pull({ _id: req.params.id });
-        user.storageUsed = Math.max(0, user.storageUsed - totalReclaimedBytes);
-        await user.save();
-
-        // 4. Activity Log
-        try {
-            await new Activity({
-                userId: req.user.id,
-                type: 'WORKSPACE_DELETED',
-                details: `"${wsName}"`
-            }).save();
-        } catch (logErr) {
-            console.error("Activity logging failed, but data was deleted.");
-        }
-
-        return res.status(200).json({ msg: "Workspace purged successfully!" });
-
+        res.json({ msg: "Workspace deleted and quota reclaimed!" });
     } catch (err) {
-        console.error("CRITICAL DELETE ERROR:", err);
-        return res.status(500).json({ msg: "Server error during deletion" });
+        res.status(500).json({ msg: "Server error during workspace removal." });
     }
 });
 

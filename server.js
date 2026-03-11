@@ -6,7 +6,6 @@ require('dotenv').config();
 const app = express();
 
 // --- 1. STRIPE WEBHOOK (MUST BE BEFORE express.json()) ---
-// server.js
 
 app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), async (req, res) => {
     const sig = req.headers['stripe-signature'];
@@ -16,49 +15,46 @@ app.post('/api/subscription/webhook', express.raw({type: 'application/json'}), a
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
+        console.error("Webhook Signature Verification Failed:", err.message);
         return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Process successful payments
-    if (event.type === 'checkout.session.completed' || event.type === 'invoice.paid') {
+    const User = require('./models/User');
+    const Activity = require('./models/Activity');
+
+    if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const User = require('./models/User');
-        const Activity = require('./models/Activity'); 
-        
-        // Find the user by Stripe Customer ID or the client_reference_id we sent during checkout
-        const user = await User.findOne({ 
-            $or: [{ stripeCustomerId: session.customer }, { _id: session.client_reference_id }] 
-        });
-        
+        const userId = session.client_reference_id;
+        const purchasedPlan = session.metadata.planName;
+
+        const user = await User.findById(userId);
         if (user) {
-            // Update Plan and Storage Limits
-            if (event.type === 'checkout.session.completed') {
-                const purchasedPlan = session.metadata.planName; // Captured from the checkout session
-                user.stripeCustomerId = session.customer;
-                
-                if (purchasedPlan === 'Premium') {
-                    user.package = 'Premium';
-                    user.storageLimit = 100 * 1024 * 1024 * 1024; // 100GB in bytes
-                } else if (purchasedPlan === 'Enterprise') {
-                    user.package = 'Enterprise';
-                    user.storageLimit = 500 * 1024 * 1024 * 1024; // 500GB in bytes
-                }
-
-                await new Activity({
-            userId: user._id,
-            type: 'PAYMENT_SUCCESS', // Use a specific type
-            details: `Successful Payment: Upgraded to ${user.package}`
-        }).save();
-            }
-
-            // Update Expiry Date
-            if (event.type === 'invoice.paid' && session.lines) {
-                user.subscriptionEnd = new Date(session.lines.data[0].period.end * 1000);
-            }
+            user.stripeCustomerId = session.customer;
+            user.package = purchasedPlan;
+            // Precise byte calculation
+            user.storageLimit = purchasedPlan === 'Enterprise' ? 500 * 1024 * 1024 * 1024 : 100 * 1024 * 1024 * 1024;
             
+            await user.save();
+            await new Activity({
+                userId: user._id,
+                type: 'PAYMENT_SUCCESS',
+                details: `Upgraded to ${purchasedPlan}`
+            }).save();
+            console.log(`⭐ Plan updated for user: ${user.email}`);
+        }
+    }
+
+    // Handle recurring billing updates
+    if (event.type === 'invoice.paid') {
+        const session = event.data.object;
+        const user = await User.findOne({ stripeCustomerId: session.customer });
+        if (user) {
+            // Stripe provides timestamps in seconds, JS needs milliseconds
+            user.subscriptionEnd = new Date(session.period_end * 1000);
             await user.save();
         }
     }
+
     res.json({received: true});
 });
 

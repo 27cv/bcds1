@@ -800,21 +800,16 @@
     </main>
 
     <script>
-        // dashboard.js
 
         const handlePaymentResponse = () => {
             const urlParams = new URLSearchParams(window.location.search);
 
             if (urlParams.get('success') === 'true') {
-                // Optional: Show a success toast or notification
-                console.log("Payment successful! Updating account status...");
-
-                // Remove the query parameters from the URL without reloading the page
-                // This prevents the "success" logic from running again if the user refreshes
                 window.history.replaceState({}, document.title, "/dashboard.html");
 
-                // Trigger a fresh fetch of user data to show the new 'Premium' status
-                loadUserStatus();
+                // Force a fresh data fetch from the backend
+                alert("🎉 Payment Success! Updating your secure storage...");
+                fetchMasterData();
             }
         };
 
@@ -996,26 +991,35 @@
         }
 
         async function deleteOwnedWorkspace() {
-            if (!confirm("CRITICAL: Permanently delete this workspace and ALL files in AWS?")) return;
+    // 1. Double check we actually have an ID
+    if (!currentWorkspaceId) {
+        return alert("Error: No workspace selected.");
+    }
 
-            // Optional: Show a loading state if you have a delete button reference
-            try {
-                const res = await fetch(`http://127.0.0.1:5001/api/subscription/workspaces/${currentWorkspaceId}`, {
-                    method: 'DELETE',
-                    headers: { 'x-auth-token': token }
-                });
+    if (!confirm("CRITICAL: Permanently delete this workspace and reclaim your GBs?")) return;
 
-                if (res.ok) {
-                    alert("✅ Remove Success: Workspace and AWS cloud folder purged.");
-                    switchTab('workspaces');
-                    fetchMasterData();
-                } else {
-                    alert("❌ Failed to delete workspace.");
-                }
-            } catch (err) {
-                alert("❌ Network Error: Could not reach server.");
+    try {
+        const res = await fetch(`http://127.0.0.1:5001/api/subscription/workspaces/${currentWorkspaceId}`, {
+            method: 'DELETE',
+            headers: { 
+                'x-auth-token': localStorage.getItem('token'),
+                'Content-Type': 'application/json'
             }
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+            alert("✅ Success: " + data.msg);
+            switchTab('workspaces'); // Go back to hub
+            fetchMasterData(); // Refresh storage bars and list
+        } else {
+            alert("❌ Failed: " + data.msg);
         }
+    } catch (err) {
+        alert("❌ Network Error: Could not reach server.");
+    }
+}
 
         async function loadFiles(driveId, targetBodyId) {
             const listBody = document.getElementById(targetBodyId);
@@ -1282,26 +1286,27 @@
         }
 
         function renderPersonalData(data) {
-            // data.used is in bytes, convert to MB for the text display
+            // 1. Calculate actual bytes used by files
             const usedMB = (data.used / (1024 * 1024)).toFixed(2);
-            let limitDisplay = "";
 
-            // DYNAMIC LIMIT DISPLAY FIX
-            if (data.package === 'Enterprise') {
-                limitDisplay = "500 GB";
-            } else if (data.package === 'Premium') {
-                limitDisplay = "100 GB";
-            } else {
-                // Fallback for Basic or specific byte-calculated limits
-                limitDisplay = (data.limit / (1024 * 1024)).toFixed(0) + " MB";
-            }
+            // 2. Calculate GBs already allocated to Workspaces
+            const allocatedBytes = data.workspacesCreated.reduce((acc, ws) => acc + ws.allocatedBytes, 0);
+            const allocatedGB = (allocatedBytes / (1024 * 1024 * 1024)).toFixed(2);
 
-            // Update text: e.g., "15.40 MB / 100 GB"
-            document.getElementById('personalStorageText').innerText = `${usedMB} MB / ${limitDisplay}`;
+            // 3. Determine Total Plan Limit based on Package
+            let totalLimitText = data.package === 'Enterprise' ? '500 GB' : (data.package === 'Premium' ? '100 GB' : '50 MB');
+            let totalLimitBytes = data.limit;
 
-            // Update Progress Bar
-            const percent = Math.min((data.used / data.limit) * 100, 100);
+            // Update Text Display
+            document.getElementById('personalStorageText').innerHTML =
+                `Used: <strong>${usedMB} MB</strong> | Allocated: <strong>${allocatedGB} GB</strong> / ${totalLimitText}`;
+
+            // Update Progress Bar (Based on Allocation)
+            const percent = Math.min((allocatedBytes / totalLimitBytes) * 100, 100);
             document.getElementById('personalStorageBar').style.width = percent + '%';
+
+            // Change bar color if getting close to limit
+            document.getElementById('personalStorageBar').style.background = percent > 90 ? 'var(--danger)' : 'var(--primary)';
         }
 
         function renderActivityFeed(activities) {
@@ -1401,11 +1406,28 @@
             }
         }
 
-        function openWorkspaceModal() {
+        async function openWorkspaceModal() {
             const modal = document.getElementById('createWorkspaceModal');
+            const availableText = document.getElementById('wsAvailableText');
+            const slider = document.getElementById('wsStorageSlider');
+
+            // Fetch fresh data to get the latest storageLimit and current workspaces
+            const res = await fetch('http://127.0.0.1:5001/api/subscription/status', {
+                headers: { 'x-auth-token': localStorage.getItem('token') }
+            });
+            const data = await res.json();
+
+            // Calculate remaining quota in GB
+            const alreadyAllocated = data.workspacesCreated.reduce((acc, ws) => acc + ws.allocatedBytes, 0);
+            const remainingGB = Math.max(0, (data.limit - alreadyAllocated) / (1024 * 1024 * 1024));
+
+            // Update UI
+            slider.max = Math.floor(remainingGB);
+            slider.value = Math.min(5, Math.floor(remainingGB));
+            document.getElementById('wsStorageValue').innerText = slider.value + " GB";
+            availableText.innerHTML = `<i class="fa-solid fa-chart-pie"></i> Remaining Quota: <strong>${remainingGB.toFixed(2)} GB</strong>`;
+
             modal.style.display = 'flex';
-            modal.style.visibility = 'visible';
-            modal.style.opacity = '1';
         }
 
         async function revokeInvite(inviteId) {
